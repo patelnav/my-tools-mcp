@@ -2,8 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
-import { ServerConfig } from '@my-tools-mcp/shared';
+import { ServerConfig, DocumentationResponse, ToolSelection } from '@my-tools-mcp/shared';
 import docsRouter from './routes/docs';
+import { fetchToolDocumentation } from './controllers/docs';
 
 const config: ServerConfig = {
   port: parseInt(process.env.PORT || '3000'),
@@ -27,13 +28,32 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
   console.log('Client connected');
 
-  ws.on('message', (message: Buffer) => {
+  ws.on('message', async (message: Buffer) => {
     try {
       const data = JSON.parse(message.toString());
       console.log('Received:', data);
-      // Handle different message types here
+
+      if (data.type === 'SELECT_TOOL') {
+        const toolSelection: ToolSelection = data.payload;
+        try {
+          const documentation = await fetchToolDocumentation(toolSelection);
+          ws.send(JSON.stringify({
+            type: 'DOCUMENTATION_UPDATED',
+            payload: documentation
+          }));
+        } catch (error) {
+          ws.send(JSON.stringify({
+            type: 'ERROR',
+            payload: error instanceof Error ? error.message : 'Failed to fetch documentation'
+          }));
+        }
+      }
     } catch (error) {
-      console.error('Error parsing message:', error);
+      console.error('Error handling message:', error);
+      ws.send(JSON.stringify({
+        type: 'ERROR',
+        payload: 'Invalid message format'
+      }));
     }
   });
 
