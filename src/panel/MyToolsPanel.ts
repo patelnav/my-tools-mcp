@@ -98,14 +98,13 @@ export class MyToolsPanel {
     const csp = `
       default-src 'none';
       style-src ${webview.cspSource} 'unsafe-inline';
-      script-src 'nonce-${nonce}';
-      connect-src ws://localhost:8080;
-      img-src 'none';
-      font-src 'none';
+      script-src 'nonce-${nonce}' ${webview.cspSource};
+      connect-src ws://localhost:* wss://localhost:* http://localhost:* https://localhost:*;
+      img-src ${webview.cspSource} https:;
+      font-src ${webview.cspSource};
       object-src 'none';
       media-src 'none';
       frame-src 'none';
-      frame-ancestors 'none';
       form-action 'none';
       base-uri 'none';
       child-src 'none';
@@ -125,10 +124,29 @@ export class MyToolsPanel {
         <script nonce="${nonce}" src="${scriptUri}"></script>
         <script nonce="${nonce}">
           console.log('WebView initialized');
+          
+          // Add WebSocket connection status to window
+          window.wsStatus = {
+            isConnecting: false,
+            retryCount: 0,
+            maxRetries: 5,
+            retryDelay: 1000,
+            lastError: null,
+            connected: false
+          };
+
           window.onerror = function(message, source, lineno, colno, error) {
             console.error('WebView error:', {message, source, lineno, colno, error});
+            if (window.wsStatus) {
+              window.wsStatus.lastError = error;
+            }
             return false;
           };
+
+          // Add connection status change handler
+          window.addEventListener('ws-status-change', function(e) {
+            console.log('WebSocket status changed:', e.detail);
+          });
         </script>
       </body>
       </html>`;
