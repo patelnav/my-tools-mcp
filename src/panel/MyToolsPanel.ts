@@ -86,22 +86,38 @@ export class MyToolsPanel {
   }
 
   private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri) {
-    // Get the local path to main script run in the webview
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(extensionUri, 'dist', 'panel.js')
     );
 
     console.log('Script URI:', scriptUri.toString());
 
-    // Use a nonce to only allow a specific script to be run
     const nonce = getNonce();
+
+    // Security: Strict Content Security Policy
+    const csp = `
+      default-src 'none';
+      style-src ${webview.cspSource} 'unsafe-inline';
+      script-src 'nonce-${nonce}';
+      connect-src ws://localhost:8080;
+      img-src 'none';
+      font-src 'none';
+      object-src 'none';
+      media-src 'none';
+      frame-src 'none';
+      frame-ancestors 'none';
+      form-action 'none';
+      base-uri 'none';
+      child-src 'none';
+      worker-src 'none';
+    `.replace(/\s+/g, ' ').trim();
 
     return `<!DOCTYPE html>
       <html lang="en">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src http://localhost:8080 ws://localhost:8080;">
+        <meta http-equiv="Content-Security-Policy" content="${csp}">
         <title>MCP Tools</title>
       </head>
       <body>
