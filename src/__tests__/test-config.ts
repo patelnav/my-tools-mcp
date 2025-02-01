@@ -1,32 +1,22 @@
 import { getServerConfig } from '@server/config';
 
-// Get a test port from our MCP range
-let testPort: number | undefined;
-let lastUsedPort: number | undefined;
+let testConfig: Awaited<ReturnType<typeof getServerConfig>> | undefined;
 
 export async function initTestConfig() {
-  // If we have a last used port, try to get the next available port
-  const config = await getServerConfig(true);
-  
-  if (lastUsedPort && config.port === lastUsedPort) {
-    // Try again to get a different port
-    const newConfig = await getServerConfig(true);
-    testPort = newConfig.port;
-  } else {
-    testPort = config.port;
+  // Initialize config if not already done
+  if (!testConfig) {
+    testConfig = await getServerConfig(true);
   }
-  
-  lastUsedPort = testPort;
-  return config;
+  return testConfig;
 }
 
 export const TEST_CONFIG = {
   server: {
     get port() {
-      if (testPort === undefined) {
-        throw new Error('Test port not initialized. Call initTestConfig() first.');
+      if (!testConfig) {
+        throw new Error('Port not initialized. Call initTestConfig() first.');
       }
-      return testPort;
+      return testConfig.port;
     },
     host: 'localhost'
   },

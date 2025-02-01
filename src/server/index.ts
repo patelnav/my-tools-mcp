@@ -98,6 +98,45 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
     }
   });
 
+  // Wait for both HTTP and WebSocket servers to be ready
+  await new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error('Server failed to start within 5 seconds'));
+    }, 5000);
+
+    let httpReady = false;
+    let wsReady = false;
+
+    function checkReady() {
+      if (httpReady && wsReady) {
+        clearTimeout(timeoutId);
+        resolve();
+      }
+    }
+
+    server.once('error', (error) => {
+      clearTimeout(timeoutId);
+      reject(error);
+    });
+
+    wss.once('error', (error) => {
+      clearTimeout(timeoutId);
+      reject(error);
+    });
+
+    // Listen for HTTP server ready
+    server.listen(config.port, config.host, () => {
+      httpReady = true;
+      checkReady();
+    });
+
+    // Listen for WebSocket server ready
+    wss.once('listening', () => {
+      wsReady = true;
+      checkReady();
+    });
+  });
+
   // Store rate limit information for each client
   const clientLimits = new Map<WebSocket, RateLimitInfo>();
 
@@ -250,13 +289,6 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
       }
       clientLimits.delete(ws);
     });
-  });
-
-  // Start the server
-  server.listen(config.port, config.host, () => {
-    if (process.env.NODE_ENV !== 'test') {
-      logCallback(`Server listening at http://${config.host}:${config.port}`);
-    }
   });
 
   return server;

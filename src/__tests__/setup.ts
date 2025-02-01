@@ -1,83 +1,116 @@
-import { beforeAll, afterAll } from 'vitest';
+import { beforeAll, afterAll, afterEach, beforeEach } from 'vitest';
 import { startMCPServer, setLogCallback } from '@server/index';
 import type { Server } from 'http';
 import path from 'path';
 import { initTestConfig } from './test-config';
+import http from 'http';
 
 // Declare global type for the server instance
 declare global {
-  var server: Server | undefined;
+  var __test_server__: Server | undefined;
 }
 
-// Server instance for the test suite
-let server: Server | undefined;
+// Helper function to check if server is ready
+async function waitForServerReady(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get(`http://localhost:${port}/health`, {
+      timeout: 1000
+    }, (res) => {
+      resolve(res.statusCode === 200);
+    });
+
+    req.on('error', () => {
+      resolve(false);
+    });
+  });
+}
 
 // Helper function to close server
 async function closeServer() {
-  if (!global.server) return;
+  if (!global.__test_server__) return;
   
   return new Promise<void>((resolve) => {
-    // Force close any remaining connections
-    global.server?.getConnections((err, count) => {
+    // Force close any remaining connections immediately
+    global.__test_server__?.getConnections((err, count) => {
       if (err) {
         console.error('Error getting connections:', err);
       } else if (count > 0) {
         console.log(`Forcing close of ${count} remaining connections`);
-        // Destroy all sockets
-        const listeners = global.server?.listeners('connection') as ((...args: any[]) => void)[];
+        const listeners = global.__test_server__?.listeners('connection') as ((...args: any[]) => void)[];
         listeners.forEach(listener => {
-          global.server?.removeListener('connection', listener);
+          global.__test_server__?.removeListener('connection', listener);
         });
       }
     });
     
-    global.server?.close(() => {
-      global.server = undefined;
+    const closeTimeout = setTimeout(() => {
+      console.log('Force closing server - timeout reached');
+      global.__test_server__ = undefined;
+      resolve();
+    }, 500);
+
+    global.__test_server__?.close(() => {
+      clearTimeout(closeTimeout);
+      global.__test_server__ = undefined;
       resolve();
     });
-    
-    // Force close after 1 second if graceful close fails
-    setTimeout(() => {
-      if (global.server) {
-        console.log('Force closing server after timeout');
-        global.server = undefined;
-        resolve();
-      }
-    }, 1000);
   });
 }
 
 async function setupServer() {
-  // Silence logs during tests
-  setLogCallback(() => {});
-
-  // Make sure any existing server is closed
-  await closeServer();
+  console.log('Setting up test server...');
   
-  // Initialize test config and start server
+  // Always start with a clean server
+  await closeServer();
+  setLogCallback(() => {});
+  
   const config = await initTestConfig();
   const testWorkspacePath = path.resolve(__dirname, '../..');
   
-  server = await startMCPServer(testWorkspacePath, true);
-  global.server = server;
+  const server = await startMCPServer(testWorkspacePath, true);
   
-  // Wait for server to be ready
-  await new Promise<void>((resolve) => {
-    if (server?.listening) {
-      resolve();
-    } else {
-      server?.once('listening', () => resolve());
-    }
+  // Wait for server to be ready before setting global
+  await new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error('Server failed to start within 10 seconds'));
+    }, 10000);
+
+    const checkReady = async () => {
+      if (!server.listening) {
+        server.once('listening', checkReady);
+        return;
+      }
+
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        reject(new Error('Invalid server address'));
+        return;
+      }
+
+      const isReady = await waitForServerReady(address.port);
+      if (isReady) {
+        clearTimeout(timeoutId);
+        resolve();
+      } else {
+        setTimeout(checkReady, 100);
+      }
+    };
+
+    checkReady();
   });
 
-  // Additional wait to ensure server is fully initialized
-  await new Promise(resolve => setTimeout(resolve, 100));
+  // Only set global after server is confirmed ready
+  global.__test_server__ = server;
+  console.log('Test server ready');
+  return server;
 }
 
-beforeAll(async () => {
+// Set up fresh server before each test
+beforeEach(async () => {
   await setupServer();
-});
+}, 10000);
 
-afterAll(async () => {
+// Clean up after each test
+afterEach(async () => {
   await closeServer();
-}); 
+}, 5000); 

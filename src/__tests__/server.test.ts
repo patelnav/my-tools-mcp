@@ -1,8 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import WebSocket from 'ws';
 import { DocumentationResponse } from '@/types';
 import { TEST_CONFIG } from './test-config';
-import { startMCPServer } from '@server/index';
 import type { Server } from 'http';
 import path from 'path';
 import fs from 'fs';
@@ -10,18 +9,13 @@ import fs from 'fs';
 describe('MCP Server Integration', () => {
   let server: Server;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     // Get the server instance from the setup
-    const globalServer = global.server;
+    const globalServer = global.__test_server__;
     if (!globalServer) {
       throw new Error('Server not initialized in setup');
     }
     server = globalServer;
-  });
-
-  afterAll(() => {
-    // Don't close the server here, it will be closed in teardown
-    return Promise.resolve();
   });
 
   const wsOptions = {
@@ -30,7 +24,13 @@ describe('MCP Server Integration', () => {
     }
   };
 
-  const getWsUrl = () => `ws://${TEST_CONFIG.server.host}:${TEST_CONFIG.server.port}`;
+  const getWsUrl = () => {
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Invalid server address');
+    }
+    return `ws://localhost:${address.port}`;
+  };
 
   // Helper function to create a WebSocket connection with timeout
   const createWebSocket = (timeout = 5000) => {

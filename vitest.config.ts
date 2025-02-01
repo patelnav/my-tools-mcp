@@ -6,15 +6,24 @@ export default defineConfig({
     // Run tests sequentially
     sequence: {
       concurrent: false,
+      shuffle: false
     },
-    // Longer timeout for integration tests
-    testTimeout: 10000,
-    // Global setup and teardown
-    setupFiles: ['./src/__tests__/setup.ts'],
-    // Environment setup
+    // Use forks for better process isolation
+    pool: 'forks',
+    poolOptions: {
+      forks: {
+        // Ensure complete isolation between test files
+        isolate: true
+      }
+    },
+    // Timeouts
+    testTimeout: 5000,
+    hookTimeout: 5000,
+    teardownTimeout: 5000,
+    // Setup files
+    setupFiles: ['src/__tests__/setup.ts'],
+    // Environment
     environment: 'node',
-    // Include source maps
-    include: ['src/__tests__/**/*.test.ts'],
   },
   resolve: {
     alias: {
