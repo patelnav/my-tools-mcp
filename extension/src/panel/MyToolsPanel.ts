@@ -10,7 +10,14 @@ export class MyToolsPanel {
     this._panel = panel;
 
     // Set the webview's initial html content
-    this._panel.webview.html = this._getHtmlForWebview(this._panel.webview, extensionUri);
+    try {
+      const webviewContent = this._getHtmlForWebview(this._panel.webview, extensionUri);
+      console.log('Initializing WebView with content length:', webviewContent.length);
+      this._panel.webview.html = webviewContent;
+    } catch (error) {
+      console.error('Error initializing WebView:', error);
+      vscode.window.showErrorMessage('Failed to initialize MCP Tools panel');
+    }
 
     // Listen for when the panel is disposed
     // This happens when the user closes the panel or when the panel is closed programmatically
@@ -19,7 +26,26 @@ export class MyToolsPanel {
     // Handle messages from the webview
     this._panel.webview.onDidReceiveMessage(
       message => {
+        console.log('Received message from WebView:', message);
         switch (message.type) {
+          case 'GET_WORKSPACE_PATH':
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            console.log('Workspace folders:', workspaceFolders);
+            if (workspaceFolders && workspaceFolders.length > 0) {
+              const path = workspaceFolders[0].uri.fsPath;
+              console.log('Sending workspace path:', path);
+              this._panel.webview.postMessage({
+                type: 'WORKSPACE_PATH',
+                path
+              });
+            } else {
+              console.log('No workspace folders found');
+              this._panel.webview.postMessage({
+                type: 'WORKSPACE_PATH',
+                path: process.cwd() // Fallback to current working directory
+              });
+            }
+            return;
           case 'error':
             vscode.window.showErrorMessage(message.value);
             return;
@@ -65,6 +91,8 @@ export class MyToolsPanel {
       vscode.Uri.joinPath(extensionUri, 'dist', 'panel.js')
     );
 
+    console.log('Script URI:', scriptUri.toString());
+
     // Use a nonce to only allow a specific script to be run
     const nonce = getNonce();
 
@@ -73,12 +101,19 @@ export class MyToolsPanel {
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}'; connect-src http://localhost:8080;">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src http://localhost:8080 ws://localhost:8080;">
         <title>MCP Tools</title>
       </head>
       <body>
         <div id="root"></div>
         <script nonce="${nonce}" src="${scriptUri}"></script>
+        <script nonce="${nonce}">
+          console.log('WebView initialized');
+          window.onerror = function(message, source, lineno, colno, error) {
+            console.error('WebView error:', {message, source, lineno, colno, error});
+            return false;
+          };
+        </script>
       </body>
       </html>`;
   }

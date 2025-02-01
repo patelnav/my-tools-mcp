@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 
 // Base configuration for both extension and webview
 const baseConfig = {
@@ -49,6 +50,20 @@ const webviewConfig = {
   output: {
     path: path.resolve(__dirname, 'dist'),
     filename: 'panel.js'
+  },
+  plugins: [
+    new webpack.ProvidePlugin({
+      process: 'process/browser'
+    }),
+    new webpack.DefinePlugin({
+      'process.env': JSON.stringify({})
+    })
+  ],
+  resolve: {
+    ...baseConfig.resolve,
+    fallback: {
+      process: require.resolve('process/browser')
+    }
   }
 };
 

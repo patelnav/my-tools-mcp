@@ -2,8 +2,78 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --container-padding: 20px;
+  --input-padding-vertical: 6px;
+  --input-padding-horizontal: 4px;
+}
+
 body {
-  margin: 0;
+  @apply bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100;
   padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  margin: 0;
+  color: var(--vscode-foreground);
+  font-size: var(--vscode-font-size);
+  font-weight: var(--vscode-font-weight);
+  font-family: var(--vscode-font-family);
+  background-color: var(--vscode-editor-background);
+}
+
+input {
+  @apply bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-gray-300 dark:border-gray-700;
+  border: 1px solid var(--vscode-input-border);
+  background-color: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+}
+
+button {
+  border: none;
+  padding: var(--input-padding-vertical) var(--input-padding-horizontal);
+  text-align: center;
+  outline: 1px solid transparent;
+  outline-offset: 2px !important;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+}
+
+button:hover {
+  cursor: pointer;
+  background: var(--vscode-button-hoverBackground);
+}
+
+button:focus {
+  outline-color: var(--vscode-focusBorder);
+}
+
+button.secondary {
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+}
+
+button.secondary:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.bg-gray-50 {
+  @apply dark:bg-gray-800;
+}
+
+.text-gray-700 {
+  @apply dark:text-gray-300;
+}
+
+.text-green-700 {
+  @apply dark:text-green-300;
+}
+
+.bg-green-100 {
+  @apply dark:bg-green-900/30;
+}
+
+.text-red-700 {
+  @apply dark:text-red-300;
+}
+
+.bg-red-100 {
+  @apply dark:bg-red-900/30;
 } 
