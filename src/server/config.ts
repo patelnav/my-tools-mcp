@@ -8,8 +8,15 @@ export const TEST_ORIGINS = new Set([
 
 // Helper function to validate VS Code webview origins
 export function isValidVSCodeWebviewOrigin(origin: string): boolean {
-  // VS Code webview origins follow the pattern: vscode-webview://hash
-  return origin.startsWith('vscode-webview://');
+  // VSCode webview origins can be:
+  // - vscode-webview://[hash]
+  // - vscode-webview-test://[hash]
+  return origin.startsWith('vscode-webview://') || 
+         origin.startsWith('vscode-webview-test://') ||
+         // For development/testing
+         origin === 'null' ||
+         origin.startsWith('http://localhost:') ||
+         origin.startsWith('https://localhost:');
 }
 
 export interface ServerConfig {

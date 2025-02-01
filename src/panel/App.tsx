@@ -18,46 +18,67 @@ export function App() {
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    const socket = new WebSocket('ws://localhost:8080');
+    // Request workspace path from VSCode
+    console.log('Requesting workspace path...');
+    vscode.postMessage({ type: 'GET_WORKSPACE_PATH' });
 
-    socket.onopen = () => {
-      console.log('Connected to MCP server');
-      setWs(socket);
-      setIsConnected(true);
-      setError(null);
-    };
+    // Listen for workspace path response
+    const messageHandler = (event: MessageEvent) => {
+      const message = event.data;
+      console.log('Received message:', message);
+      
+      if (message.type === 'WORKSPACE_PATH') {
+        console.log('Setting project path to:', message.path);
+        // Now that we have the workspace path and server port, try to connect
+        const socket = new WebSocket(`ws://localhost:${message.serverPort}`);
 
-    socket.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        switch (message.type) {
-          case 'DOCUMENTATION_UPDATED':
-            setDocumentation(message.payload);
-            setError(null);
-            break;
-          case 'ERROR':
-            setError(message.payload);
-            break;
-        }
-      } catch (err) {
-        setError('Failed to parse server message');
+        socket.onopen = () => {
+          console.log('Connected to MCP server');
+          setWs(socket);
+          setIsConnected(true);
+          setError(null);
+        };
+
+        socket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            switch (message.type) {
+              case 'DOCUMENTATION_UPDATED':
+                setDocumentation(message.payload);
+                setError(null);
+                break;
+              case 'ERROR':
+                setError(message.payload);
+                break;
+            }
+          } catch (err) {
+            setError('Failed to parse server message');
+          }
+        };
+
+        socket.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          setError('WebSocket connection error');
+          setIsConnected(false);
+          vscode.postMessage({ type: 'error', value: 'Failed to connect to MCP server' });
+        };
+
+        socket.onclose = () => {
+          console.log('WebSocket connection closed');
+          setWs(null);
+          setIsConnected(false);
+          setError('Connection closed');
+        };
+
+        return () => {
+          socket.close();
+        };
       }
     };
 
-    socket.onerror = () => {
-      setError('WebSocket connection error');
-      setIsConnected(false);
-      vscode.postMessage({ type: 'error', value: 'Failed to connect to MCP server' });
-    };
-
-    socket.onclose = () => {
-      setWs(null);
-      setIsConnected(false);
-      setError('Connection closed');
-    };
-
+    window.addEventListener('message', messageHandler);
     return () => {
-      socket.close();
+      window.removeEventListener('message', messageHandler);
     };
   }, []);
 

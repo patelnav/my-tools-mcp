@@ -103,7 +103,8 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
     try {
       const workspaceMessage = JSON.stringify({
         type: 'WORKSPACE_PATH',
-        path: validWorkspacePath
+        path: validWorkspacePath,
+        serverPort: config.port // Include server port in workspace message
       });
       logCallback(`Sending workspace path message: ${workspaceMessage}`, 'info');
       ws.send(workspaceMessage);
@@ -124,37 +125,28 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
       ws.close();
     });
 
-    ws.on('message', async (message: Buffer) => {
-      // Security: Check rate limit
-      const limitInfo = clientLimits.get(ws);
-      if (!limitInfo) {
-        logCallback(`No rate limit info for client ${clientIp}`, 'warn');
-        ws.close();
-        return;
-      }
-
-      if (Date.now() > limitInfo.resetTime) {
-        limitInfo.count = 0;
-        limitInfo.resetTime = Date.now() + config.rateLimit.windowMs;
-      }
-
-      if (++limitInfo.count > config.rateLimit.maxRequestsPerMinute) {
-        logCallback(`Rate limit exceeded for client ${clientIp}`, 'warn');
-        ws.send(JSON.stringify({
-          type: 'ERROR',
-          payload: 'Rate limit exceeded'
-        }));
-        return;
-      }
-
+    ws.on('message', async (message) => {
       try {
         const data = JSON.parse(message.toString());
-        logCallback(`Received message from ${clientIp}: ${JSON.stringify(data)}`);
+        logCallback(`Received message from ${clientIp}: ${JSON.stringify(data)}`, 'info');
 
         if (data.type === 'SELECT_TOOL') {
           const toolSelection: ToolSelection = data.payload;
+          logCallback(`Processing tool selection: ${JSON.stringify(toolSelection)}`, 'info');
+          
+          // Validate the tool selection
+          if (!toolSelection || !toolSelection.name || !toolSelection.projectPath) {
+            logCallback('Invalid tool selection: missing required fields', 'warn');
+            ws.send(JSON.stringify({
+              type: 'ERROR',
+              payload: 'Invalid tool selection'
+            }));
+            return;
+          }
+
           try {
             const documentation = await fetchToolDocumentation(toolSelection);
+            logCallback(`Documentation fetched successfully for ${toolSelection.name}`, 'info');
             ws.send(JSON.stringify({
               type: 'DOCUMENTATION_UPDATED',
               payload: documentation
@@ -164,7 +156,7 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
             logCallback(`Failed to fetch documentation: ${errorMessage}`, 'error');
             ws.send(JSON.stringify({
               type: 'ERROR',
-              payload: 'Failed to fetch documentation'
+              payload: `Failed to fetch documentation: ${errorMessage}`
             }));
           }
         } else {
@@ -175,7 +167,7 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
           }));
         }
       } catch (error) {
-        logCallback('Error parsing message', 'error');
+        logCallback(`Error processing message: ${error}`, 'error');
         ws.send(JSON.stringify({
           type: 'ERROR',
           payload: 'Invalid message format'

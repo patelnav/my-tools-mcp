@@ -5,9 +5,11 @@ export class MyToolsPanel {
   public static currentPanel: MyToolsPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
+  private _serverPort: number;
 
-  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
+  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, serverPort: number) {
     this._panel = panel;
+    this._serverPort = serverPort;
 
     // Set the webview's initial html content
     try {
@@ -36,13 +38,15 @@ export class MyToolsPanel {
               console.log('Sending workspace path:', path);
               this._panel.webview.postMessage({
                 type: 'WORKSPACE_PATH',
-                path
+                path,
+                serverPort: this._serverPort
               });
             } else {
               console.log('No workspace folders found');
               this._panel.webview.postMessage({
                 type: 'WORKSPACE_PATH',
-                path: process.cwd() // Fallback to current working directory
+                path: process.cwd(), // Fallback to current working directory
+                serverPort: this._serverPort
               });
             }
             return;
@@ -56,7 +60,7 @@ export class MyToolsPanel {
     );
   }
 
-  public static createOrShow(extensionUri: vscode.Uri) {
+  public static createOrShow(extensionUri: vscode.Uri, serverPort: number) {
     const column = vscode.window.activeTextEditor
       ? vscode.window.activeTextEditor.viewColumn
       : undefined;
@@ -82,7 +86,7 @@ export class MyToolsPanel {
       }
     );
 
-    MyToolsPanel.currentPanel = new MyToolsPanel(panel, extensionUri);
+    MyToolsPanel.currentPanel = new MyToolsPanel(panel, extensionUri, serverPort);
   }
 
   private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri) {

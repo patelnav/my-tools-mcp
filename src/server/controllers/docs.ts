@@ -85,7 +85,8 @@ function validateToolName(toolName: string): boolean {
   // Check each part of the command
   for (const part of parts) {
     // SECURITY: Reject if part contains disallowed characters
-    if (!/^[a-zA-Z0-9@-_]+$/.test(part)) {
+    if (!/^[a-zA-Z0-9@\-_.]+$/.test(part)) {
+      console.warn(`Invalid characters in tool name part: ${part}`);
       return false;
     }
     
@@ -93,16 +94,19 @@ function validateToolName(toolName: string): boolean {
     if (part.includes('$(') || 
         part.includes('${') || 
         part.includes('`')) {
+      console.warn(`Tool name contains shell expansion: ${part}`);
       return false;
     }
 
     // Check against blacklist
     if (BLACKLISTED_TOOLS.has(part.toLowerCase())) {
+      console.warn(`Tool is blacklisted: ${part}`);
       return false;
     }
     
     // SECURITY: Prevent path traversal
     if (part.includes('/') || part.includes('\\')) {
+      console.warn(`Tool name contains path separator: ${part}`);
       return false;
     }
     
@@ -111,12 +115,13 @@ function validateToolName(toolName: string): boolean {
         part.includes('||') || 
         part.includes('|') || 
         part.includes(';')) {
+      console.warn(`Tool name contains command chaining: ${part}`);
       return false;
     }
   }
 
   // Allow common package manager commands
-  const validPrefixes = ['npm', 'pnpm', 'yarn', 'cargo', 'go', 'dotnet'];
+  const validPrefixes = ['npm', 'pnpm', 'yarn', 'cargo', 'go', 'dotnet', 'git'];
   if (parts.length > 1) {
     return validPrefixes.includes(parts[0].toLowerCase());
   }
@@ -130,9 +135,27 @@ function validateArgs(args: string[]): boolean {
 }
 
 // Validate project path to prevent path traversal
-function validateProjectPath(projectPath: string): boolean {
-  const normalizedPath = path.normalize(projectPath);
-  return !normalizedPath.includes('..');
+async function validateProjectPath(projectPath: string): Promise<boolean> {
+  try {
+    // Resolve to absolute path
+    const absolutePath = path.resolve(projectPath);
+    console.log(`Validating project path: ${absolutePath}`);
+    
+    // Check if path exists and is a directory
+    const stats = await stat(absolutePath);
+    if (!stats.isDirectory()) {
+      console.warn(`Project path is not a directory: ${absolutePath}`);
+      return false;
+    }
+    
+    // Check if we have read access
+    await access(absolutePath, constants.R_OK);
+    
+    return true;
+  } catch (error) {
+    console.warn(`Error validating project path: ${error}`);
+    return false;
+  }
 }
 
 /**
@@ -152,11 +175,27 @@ async function confirmDirectoryExists(projectPath: string): Promise<boolean> {
 // Check if a tool is installed and executable
 async function isToolExecutable(toolName: string): Promise<boolean> {
   try {
-    // Try to access the tool in the PATH
-    const which = promisify(require('which'));
-    await which(toolName);
-    return true;
-  } catch {
+    // For development, we'll just check if the command exists in PATH
+    const command = toolName.split(' ')[0];
+    const { spawn } = require('child_process');
+    
+    return new Promise<boolean>((resolve) => {
+      const which = process.platform === 'win32' ? 'where' : 'which';
+      const child = spawn(which, [command], {
+        shell: true,
+        timeout: 2000
+      });
+      
+      child.on('exit', (code: number) => {
+        resolve(code === 0);
+      });
+      
+      child.on('error', () => {
+        resolve(false);
+      });
+    });
+  } catch (error) {
+    console.warn(`Error checking tool executable: ${error}`);
     return false;
   }
 }
@@ -226,53 +265,70 @@ async function getToolVersion(toolName: string, projectPath: string): Promise<st
 }
 
 export async function fetchToolDocumentation(tool: ToolSelection): Promise<DocumentationResponse> {
+  // Log incoming request
+  console.log(`Fetching documentation for tool: ${tool.name} in path: ${tool.projectPath}`);
+  
   // Security: Validate inputs
   if (!validateToolName(tool.name)) {
+    console.warn(`Invalid tool name: ${tool.name}`);
     return {
       success: false,
       error: 'Tool name not permitted'
     };
   }
+  
   if (!validateProjectPath(tool.projectPath)) {
+    console.warn(`Invalid project path: ${tool.projectPath}`);
     return {
       success: false,
       error: 'Project path is invalid'
     };
   }
-  if (!(await isToolExecutable(tool.name))) {
-    return {
-      success: false,
-      // SECURITY: Minimally descriptive error to avoid revealing internal paths or OS details
-      error: 'Requested tool is unavailable'
-    };
-  }
-
-  // SECURITY: Confirm directory exists and is accessible
-  if (!(await confirmDirectoryExists(tool.projectPath))) {
-    return {
-      success: false,
-      error: 'Project path is invalid or inaccessible'
-    };
-  }
-
-  const cacheKey = `${tool.name}@${tool.projectPath}`;
   
-  // Check cache first
-  const cached = docCache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
   try {
+    const isExecutable = await isToolExecutable(tool.name);
+    if (!isExecutable) {
+      console.warn(`Tool not executable: ${tool.name}`);
+      return {
+        success: false,
+        error: 'Requested tool is unavailable'
+      };
+    }
+
+    // SECURITY: Confirm directory exists and is accessible
+    const dirExists = await confirmDirectoryExists(tool.projectPath);
+    if (!dirExists) {
+      console.warn(`Directory not accessible: ${tool.projectPath}`);
+      return {
+        success: false,
+        error: 'Project path is invalid or inaccessible'
+      };
+    }
+
+    const cacheKey = `${tool.name}@${tool.projectPath}`;
+    
+    // Check cache first
+    const cached = docCache.get(cacheKey);
+    if (cached) {
+      console.log(`Returning cached documentation for ${cacheKey}`);
+      return cached;
+    }
+
+    console.log(`Fetching version for ${tool.name}`);
     const version = await getToolVersion(tool.name, tool.projectPath);
+    console.log(`Got version: ${version}`);
+    
+    console.log(`Fetching help text for ${tool.name}`);
     const helpText = await new Promise<string>((resolve, reject) => {
       // Try --help first, then -h if that fails
       const tryHelp = async (args: string[]) => {
         if (!validateArgs(args)) {
+          console.error(`Invalid args for ${tool.name}: ${args.join(' ')}`);
           reject(new Error('Invalid command arguments'));
           return;
         }
 
+        console.log(`Spawning ${tool.name} with args: ${args.join(' ')}`);
         const child = spawn(tool.name, args, {
           cwd: tool.projectPath,
           shell: false, // Security: Disable shell execution
@@ -285,6 +341,7 @@ export async function fetchToolDocumentation(tool: ToolSelection): Promise<Docum
         child.stdout.on('data', (data) => {
           // Security: Limit output size
           if (output.length > 50000) {
+            console.warn(`Output size limit exceeded for ${tool.name}`);
             child.kill();
             reject(new Error('Output exceeds size limit'));
             return;
@@ -297,11 +354,14 @@ export async function fetchToolDocumentation(tool: ToolSelection): Promise<Docum
         });
 
         child.on('close', (code) => {
+          console.log(`Command ${tool.name} exited with code ${code}`);
           if (code !== 0) {
             if (args[0] === '--help') {
+              console.log(`--help failed for ${tool.name}, trying -h`);
               // Try -h if --help failed
               tryHelp(['-h']).catch(reject);
             } else {
+              console.error(`Both --help and -h failed for ${tool.name}`);
               reject(new Error('Command failed'));
             }
           } else {
@@ -316,6 +376,7 @@ export async function fetchToolDocumentation(tool: ToolSelection): Promise<Docum
       tryHelp(['--help']).catch(reject);
     });
 
+    console.log(`Successfully got help text for ${tool.name}`);
     const response: DocumentationResponse = {
       success: true,
       data: {
@@ -328,12 +389,13 @@ export async function fetchToolDocumentation(tool: ToolSelection): Promise<Docum
 
     // Cache the result
     docCache.set(cacheKey, response);
+    console.log(`Cached documentation for ${cacheKey}`);
 
     return response;
   } catch (error) {
+    console.error(`Error fetching documentation for ${tool.name}:`, error);
     return {
       success: false,
-      // SECURITY: Generic error message to avoid leaking implementation details
       error: 'Failed to retrieve documentation'
     };
   }
