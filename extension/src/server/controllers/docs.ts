@@ -32,7 +32,9 @@ async function getToolVersion(toolName: string, projectPath: string): Promise<st
       });
     });
 
-    return versionText;
+    // Extract version number from version text (e.g. "git version 2.48.1" -> "2.48.1")
+    const versionMatch = versionText.match(/\d+\.\d+\.\d+/);
+    return versionMatch ? versionMatch[0] : versionText;
   } catch (error) {
     console.warn(`Could not determine version for ${toolName}:`, error);
     return 'unknown';
