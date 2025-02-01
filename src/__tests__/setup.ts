@@ -14,13 +14,36 @@ let server: Server | undefined;
 
 // Helper function to close server
 async function closeServer() {
-  if (!server) return;
+  if (!global.server) return;
+  
   return new Promise<void>((resolve) => {
-    server?.close(() => {
-      server = undefined;
+    // Force close any remaining connections
+    global.server?.getConnections((err, count) => {
+      if (err) {
+        console.error('Error getting connections:', err);
+      } else if (count > 0) {
+        console.log(`Forcing close of ${count} remaining connections`);
+        // Destroy all sockets
+        const listeners = global.server?.listeners('connection') as ((...args: any[]) => void)[];
+        listeners.forEach(listener => {
+          global.server?.removeListener('connection', listener);
+        });
+      }
+    });
+    
+    global.server?.close(() => {
       global.server = undefined;
       resolve();
     });
+    
+    // Force close after 1 second if graceful close fails
+    setTimeout(() => {
+      if (global.server) {
+        console.log('Force closing server after timeout');
+        global.server = undefined;
+        resolve();
+      }
+    }, 1000);
   });
 }
 

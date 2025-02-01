@@ -60,30 +60,23 @@ describe('MCP Server Integration', () => {
       const messageHandler = (data: Buffer) => {
         try {
           const message = JSON.parse(data.toString());
-          console.log(`Received message: ${JSON.stringify(message)}`);
           if (message.type === type) {
-            console.log(`Found matching message type: ${type}`);
             ws.removeListener('message', messageHandler);
             resolve(message);
-          } else {
-            console.log(`Message type ${message.type} did not match expected type ${type}`);
           }
         } catch (error) {
-          console.error('Error parsing message:', error);
           ws.removeListener('message', messageHandler);
           reject(error);
         }
       };
 
       const errorHandler = (error: Error) => {
-        console.error('WebSocket error:', error);
         ws.removeListener('message', messageHandler);
         ws.removeListener('error', errorHandler);
         reject(error);
       };
 
       const closeHandler = () => {
-        console.log('WebSocket closed while waiting for message');
         ws.removeListener('message', messageHandler);
         ws.removeListener('error', errorHandler);
         ws.removeListener('close', closeHandler);
@@ -125,23 +118,19 @@ describe('MCP Server Integration', () => {
 
   // Helper function to expect a message of a certain type
   const expectMessage = async (ws: WebSocket, type: string, assertFn?: (message: any) => void) => {
-    console.log(`Waiting for message type: ${type}`);
     const message = await Promise.race([
       waitForMessage(ws, type),
       new Promise((_, reject) => {
         const timeoutId = setTimeout(() => {
-          console.log(`Timeout reached while waiting for message type: ${type}`);
           reject(new Error(`Timeout waiting for message type: ${type}`));
         }, 5000);
         ws.once('close', () => {
-          console.log('WebSocket closed during expectMessage');
           clearTimeout(timeoutId);
           reject(new Error('WebSocket closed while waiting for message'));
         });
       })
     ]);
 
-    console.log(`Successfully received message of type ${type}`);
     if (assertFn) {
       assertFn(message);
     }
@@ -200,44 +189,83 @@ describe('MCP Server Integration', () => {
       payload: { name: 'git', projectPath: process.cwd() }
     };
     
-    // Send all requests at once
-    await Promise.all(
-      Array(maxRequests).fill(null).map(() => 
-        ws.send(JSON.stringify(message))
-      )
-    );
+    // Track responses
+    const messages: string[] = [];
+    const messagePromise = new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        ws.close();
+        reject(new Error('Rate limit test timed out'));
+      }, 5000);
 
-    return new Promise<void>((resolve) => {
-      const messages: string[] = [];
-      
       ws.on('message', (data) => {
-        const message = JSON.parse(data.toString());
-        messages.push(message.type);
-        
-        if (message.type === 'ERROR' && message.payload === 'Rate limit exceeded') {
-          expect(messages.filter(m => m === 'DOCUMENTATION_UPDATED').length).toBeLessThan(maxRequests);
+        try {
+          const message = JSON.parse(data.toString());
+          messages.push(message.type);
+          
+          // Check if we've hit the rate limit
+          if (message.type === 'ERROR' && message.payload === 'Rate limit exceeded') {
+            clearTimeout(timeoutId);
+            expect(messages.filter(m => m === 'DOCUMENTATION_UPDATED').length).toBeLessThan(maxRequests);
+            ws.close();
+            resolve();
+          }
+          
+          // Or if we've received all successful responses (test failed)
+          if (messages.filter(m => m === 'DOCUMENTATION_UPDATED').length >= maxRequests) {
+            clearTimeout(timeoutId);
+            ws.close();
+            reject(new Error('Rate limit was not enforced'));
+          }
+        } catch (error) {
+          clearTimeout(timeoutId);
           ws.close();
-          resolve();
+          reject(error);
         }
       });
+
+      ws.on('error', (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
     });
+
+    // Send requests one at a time to not overwhelm the connection
+    for (let i = 0; i < maxRequests; i++) {
+      ws.send(JSON.stringify(message));
+      // Small delay between sends to ensure order
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
+    await messagePromise;
   });
 
-  it('should reject invalid origin', () => {
+  it('should reject invalid origin', async () => {
     const invalidWs = new WebSocket(getWsUrl(), {
       headers: { 'Origin': 'invalid-origin' }
     });
 
-    return new Promise<void>((resolve, reject) => {
-      invalidWs.on('error', (error) => {
-        expect(error.message).toContain('401');
-        resolve();
-      });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          invalidWs.close();
+          reject(new Error('Test timed out'));
+        }, 5000);
 
-      invalidWs.on('open', () => {
-        reject(new Error('Connection should not be established'));
+        invalidWs.on('error', (error) => {
+          clearTimeout(timeoutId);
+          expect(error.message).toContain('401');
+          resolve();
+        });
+
+        invalidWs.on('open', () => {
+          clearTimeout(timeoutId);
+          invalidWs.close();
+          reject(new Error('Connection should not be established'));
+        });
       });
-    });
+    } finally {
+      invalidWs.close();
+    }
   });
 
   it('should handle multiple concurrent connections', async () => {
@@ -259,25 +287,23 @@ describe('MCP Server Integration', () => {
       ws.on('message', (data) => {
         try {
           const message = JSON.parse(data.toString());
-          console.log(`Received message: ${JSON.stringify(message)}`);
           if (message.type === 'WORKSPACE_PATH') {
             clearTimeout(timeoutId);
             ws.close();
             resolve(message);
           }
         } catch (error) {
-          console.error('Error parsing message:', error);
+          clearTimeout(timeoutId);
+          reject(error);
         }
       });
 
       ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
         clearTimeout(timeoutId);
         reject(error);
       });
 
       ws.on('close', () => {
-        console.log('WebSocket closed');
         clearTimeout(timeoutId);
       });
     });
@@ -290,7 +316,6 @@ describe('MCP Server Integration', () => {
   });
 
   it('should handle reconnection attempts', async () => {
-    // First connection
     return new Promise<void>((resolve, reject) => {
       const ws1 = new WebSocket(getWsUrl(), wsOptions);
       let firstPathReceived = false;
@@ -298,7 +323,6 @@ describe('MCP Server Integration', () => {
       ws1.on('message', async (data) => {
         try {
           const message = JSON.parse(data.toString());
-          console.log('First connection received:', message);
           
           if (message.type === 'WORKSPACE_PATH') {
             expect(message.path).toBe(process.cwd());
@@ -314,7 +338,6 @@ describe('MCP Server Integration', () => {
             ws2.on('message', (data) => {
               try {
                 const message = JSON.parse(data.toString());
-                console.log('Second connection received:', message);
                 
                 if (message.type === 'WORKSPACE_PATH') {
                   expect(message.path).toBe(process.cwd());
@@ -328,7 +351,6 @@ describe('MCP Server Integration', () => {
             });
 
             ws2.on('error', (error) => {
-              console.error('Second connection error:', error);
               reject(error);
             });
           }
@@ -339,7 +361,6 @@ describe('MCP Server Integration', () => {
       });
 
       ws1.on('error', (error) => {
-        console.error('First connection error:', error);
         reject(error);
       });
 
@@ -360,7 +381,6 @@ describe('MCP Server Integration', () => {
       ws.on('message', (data) => {
         try {
           const message = JSON.parse(data.toString());
-          console.log('Validation test received:', message);
           
           if (message.type === 'WORKSPACE_PATH') {
             expect(message.path).toBe(process.cwd());
@@ -374,7 +394,6 @@ describe('MCP Server Integration', () => {
       });
 
       ws.on('error', (error) => {
-        console.error('Validation test error:', error);
         reject(error);
       });
 

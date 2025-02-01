@@ -22,7 +22,11 @@ interface VerifyClientInfo {
 
 // Debug logging function - this will be replaced by the extension's logger
 let logCallback: (message: string, type?: 'info' | 'error' | 'warn') => void = 
-  (message, type = 'info') => console.log(`[MCP Server] ${message}`);
+  (message, type = 'info') => {
+    if (process.env.NODE_ENV !== 'test') {
+      console.log(`[MCP Server] ${message}`);
+    }
+  };
 
 export function setLogCallback(callback: typeof logCallback) {
   logCallback = callback;
@@ -31,7 +35,9 @@ export function setLogCallback(callback: typeof logCallback) {
 function validateWorkspacePath(workspacePath: string): string {
   // If path doesn't exist or isn't a directory, fall back to current working directory
   if (!fs.existsSync(workspacePath) || !fs.statSync(workspacePath).isDirectory()) {
-    logCallback(`Invalid workspace path: ${workspacePath}, falling back to cwd`, 'warn');
+    if (process.env.NODE_ENV !== 'test') {
+      logCallback(`Invalid workspace path: ${workspacePath}, falling back to cwd`, 'warn');
+    }
     return process.cwd();
   }
   // Return absolute path to avoid any relative path issues
@@ -39,9 +45,15 @@ function validateWorkspacePath(workspacePath: string): string {
 }
 
 export async function startMCPServer(workspacePath: string, isTest = false) {
+  if (isTest) {
+    process.env.NODE_ENV = 'test';
+  }
+  
   const config = await getServerConfig(isTest);
   const validWorkspacePath = validateWorkspacePath(workspacePath);
-  logCallback(`Starting server with config: ${JSON.stringify(config)}`);
+  if (process.env.NODE_ENV !== 'test') {
+    logCallback(`Starting server with config: ${JSON.stringify(config)}`);
+  }
   
   const app = express();
   
@@ -77,9 +89,9 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
     // Security: Verify client connection
     verifyClient: ({ origin }: VerifyClientInfo) => {
       const allowed = config.allowedOrigins.has(origin) || isValidVSCodeWebviewOrigin(origin);
-      if (!allowed) {
+      if (!allowed && process.env.NODE_ENV !== 'test') {
         logCallback(`Rejected connection from unauthorized origin: ${origin}`, 'warn');
-      } else {
+      } else if (process.env.NODE_ENV !== 'test') {
         logCallback(`Accepted connection from origin: ${origin}`);
       }
       return allowed;
@@ -91,29 +103,39 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
 
   // Handle server errors
   wss.on('error', (error) => {
-    logCallback(`WebSocket server error: ${error.message}`, 'error');
+    if (process.env.NODE_ENV !== 'test') {
+      logCallback(`WebSocket server error: ${error.message}`, 'error');
+    }
   });
 
   // WebSocket connection handling
   wss.on('connection', (ws, request) => {
     const clientIp = request.socket.remoteAddress;
-    logCallback(`Client connected from ${clientIp}`, 'info');
+    if (process.env.NODE_ENV !== 'test') {
+      logCallback(`Client connected from ${clientIp}`, 'info');
+    }
 
     // Send workspace path immediately on connection
     try {
       const workspaceMessage = JSON.stringify({
         type: 'WORKSPACE_PATH',
         path: validWorkspacePath,
-        serverPort: config.port // Include server port in workspace message
+        serverPort: config.port
       });
-      logCallback(`Sending workspace path message: ${workspaceMessage}`, 'info');
+      if (process.env.NODE_ENV !== 'test') {
+        logCallback(`Sending workspace path message: ${workspaceMessage}`, 'info');
+      }
       ws.send(workspaceMessage);
-      logCallback('Workspace path message sent successfully', 'info');
+      if (process.env.NODE_ENV !== 'test') {
+        logCallback('Workspace path message sent successfully', 'info');
+      }
     } catch (error) {
-      logCallback(`Failed to send workspace path: ${error}`, 'error');
+      if (process.env.NODE_ENV !== 'test') {
+        logCallback(`Failed to send workspace path: ${error}`, 'error');
+      }
     }
 
-    // Security: Initialize rate limiting for this client
+    // Initialize rate limit for client
     clientLimits.set(ws, {
       count: 0,
       resetTime: Date.now() + config.rateLimit.windowMs
@@ -121,22 +143,61 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
 
     // Handle client errors
     ws.on('error', (error) => {
-      logCallback(`WebSocket client error: ${error.message}`, 'error');
+      if (process.env.NODE_ENV !== 'test') {
+        logCallback(`WebSocket client error: ${error.message}`, 'error');
+      }
       ws.close();
     });
 
     ws.on('message', async (message) => {
       try {
+        // Check rate limit
+        const limit = clientLimits.get(ws);
+        if (!limit) {
+          if (process.env.NODE_ENV !== 'test') {
+            logCallback('Rate limit info not found for client', 'error');
+          }
+          ws.close();
+          return;
+        }
+
+        // Reset counter if window has passed
+        if (Date.now() > limit.resetTime) {
+          limit.count = 0;
+          limit.resetTime = Date.now() + config.rateLimit.windowMs;
+        }
+
+        // Check if rate limit exceeded
+        if (limit.count >= config.rateLimit.maxRequestsPerMinute) {
+          if (process.env.NODE_ENV !== 'test') {
+            logCallback(`Rate limit exceeded for client ${clientIp}`, 'warn');
+          }
+          ws.send(JSON.stringify({
+            type: 'ERROR',
+            payload: 'Rate limit exceeded'
+          }));
+          return;
+        }
+
+        // Increment counter
+        limit.count++;
+
         const data = JSON.parse(message.toString());
-        logCallback(`Received message from ${clientIp}: ${JSON.stringify(data)}`, 'info');
+        if (process.env.NODE_ENV !== 'test') {
+          logCallback(`Received message from ${clientIp}: ${JSON.stringify(data)}`, 'info');
+        }
 
         if (data.type === 'SELECT_TOOL') {
           const toolSelection: ToolSelection = data.payload;
-          logCallback(`Processing tool selection: ${JSON.stringify(toolSelection)}`, 'info');
+          if (process.env.NODE_ENV !== 'test') {
+            logCallback(`Processing tool selection: ${JSON.stringify(toolSelection)}`, 'info');
+          }
           
           // Validate the tool selection
           if (!toolSelection || !toolSelection.name || !toolSelection.projectPath) {
-            logCallback('Invalid tool selection: missing required fields', 'warn');
+            if (process.env.NODE_ENV !== 'test') {
+              logCallback('Invalid tool selection: missing required fields', 'warn');
+            }
             ws.send(JSON.stringify({
               type: 'ERROR',
               payload: 'Invalid tool selection'
@@ -146,28 +207,36 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
 
           try {
             const documentation = await fetchToolDocumentation(toolSelection);
-            logCallback(`Documentation fetched successfully for ${toolSelection.name}`, 'info');
+            if (process.env.NODE_ENV !== 'test') {
+              logCallback(`Documentation fetched successfully for ${toolSelection.name}`, 'info');
+            }
             ws.send(JSON.stringify({
               type: 'DOCUMENTATION_UPDATED',
               payload: documentation
             }));
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            logCallback(`Failed to fetch documentation: ${errorMessage}`, 'error');
+            if (process.env.NODE_ENV !== 'test') {
+              logCallback(`Error fetching documentation: ${errorMessage}`, 'error');
+            }
             ws.send(JSON.stringify({
               type: 'ERROR',
               payload: `Failed to fetch documentation: ${errorMessage}`
             }));
           }
         } else {
-          logCallback(`Invalid message type from ${clientIp}: ${data.type}`, 'warn');
+          if (process.env.NODE_ENV !== 'test') {
+            logCallback(`Unknown message type: ${data.type}`, 'warn');
+          }
           ws.send(JSON.stringify({
             type: 'ERROR',
-            payload: 'Invalid message type'
+            payload: 'Unknown message type'
           }));
         }
       } catch (error) {
-        logCallback(`Error processing message: ${error}`, 'error');
+        if (process.env.NODE_ENV !== 'test') {
+          logCallback('Error parsing message', 'error');
+        }
         ws.send(JSON.stringify({
           type: 'ERROR',
           payload: 'Invalid message format'
@@ -176,15 +245,18 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
     });
 
     ws.on('close', () => {
-      // Security: Clean up rate limit info when client disconnects
+      if (process.env.NODE_ENV !== 'test') {
+        logCallback(`Client disconnected: ${clientIp}`, 'info');
+      }
       clientLimits.delete(ws);
-      logCallback(`Client ${clientIp} disconnected`);
     });
   });
 
   // Start the server
   server.listen(config.port, config.host, () => {
-    logCallback(`Server listening at http://${config.host}:${config.port}`);
+    if (process.env.NODE_ENV !== 'test') {
+      logCallback(`Server listening at http://${config.host}:${config.port}`);
+    }
   });
 
   return server;
