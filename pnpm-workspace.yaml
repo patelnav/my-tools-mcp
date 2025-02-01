@@ -1,5 +1,1 @@
-packages:
-  - 'extension'
-  - 'server'
-  - 'ui'
-  - 'shared' 
+packages: [] 

@@ -1,45 +1,80 @@
 {
-  "name": "@my-tools-mcp/ui",
-  "private": true,
+  "name": "my-tools-mcp",
+  "displayName": "MCP Tools Documentation",
   "version": "1.0.0",
-  "type": "module",
+  "description": "MCP-connected tool documentation server with integrated UI",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "mcpTools.openPanel",
+        "title": "Open MCP Tools"
+      }
+    ]
+  },
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview",
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "lint": "eslint src --ext ts,tsx",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "webpack --watch",
+    "build": "webpack --mode production",
     "clean": "rimraf dist"
   },
   "dependencies": {
-    "@my-tools-mcp/shared": "workspace:*",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "^2.0.6",
     "@radix-ui/react-scroll-area": "^1.0.5",
     "@radix-ui/react-select": "^2.0.0",
     "@radix-ui/react-toast": "^1.1.5",
     "class-variance-authority": "^0.7.0",
-    "clsx": "^2.1.0",
+    "clsx": "^2.1.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
     "lucide-react": "^0.323.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "tailwind-merge": "^2.2.1",
-    "tailwindcss-animate": "^1.0.7"
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss-animate": "^1.0.7",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.16",
-    "@types/react": "^18.2.43",
-    "@types/react-dom": "^18.2.17",
-    "@typescript-eslint/eslint-plugin": "^6.14.0",
-    "@typescript-eslint/parser": "^6.14.0",
-    "@vitejs/plugin-react-swc": "^3.5.0",
-    "autoprefixer": "^10.4.17",
-    "eslint": "^8.55.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.17.16",
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@types/vscode": "^1.96.0",
+    "@types/ws": "^8.5.14",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "@vitest/ui": "^1.6.0",
+    "autoprefixer": "^10.4.20",
+    "bufferutil": "^4.0.9",
+    "css-loader": "^6.11.0",
+    "eslint": "^8.57.1",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
-    "postcss": "^8.4.33",
+    "postcss": "^8.5.1",
+    "postcss-loader": "^8.1.1",
+    "process": "^0.11.10",
     "rimraf": "^5.0.5",
-    "tailwindcss": "^3.4.1",
-    "typescript": "^5.2.2",
-    "vite": "^5.0.8"
+    "style-loader": "^3.3.4",
+    "tailwindcss": "^3.4.17",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.7.3",
+    "utf-8-validate": "^6.0.5",
+    "vitest": "^1.6.0",
+    "webpack": "^5.97.1",
+    "webpack-cli": "^5.1.4"
   }
 }

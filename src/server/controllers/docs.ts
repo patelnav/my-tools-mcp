@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { DocumentationResponse, ToolSelection } from '@my-tools-mcp/shared';
+import { DocumentationResponse, ToolSelection } from '@/types/types';
 
 // Simple in-memory cache
 const docCache = new Map<string, DocumentationResponse>();

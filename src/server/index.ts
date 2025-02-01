@@ -1,8 +1,9 @@
 import express from 'express';
 import cors from 'cors';
-import { WebSocketServer } from 'ws';
-import { createServer } from 'http';
-import { ServerConfig, DocumentationResponse, ToolSelection } from '@my-tools-mcp/shared';
+import WebSocket from 'ws';
+import http from 'http';
+import { AddressInfo } from 'net';
+import { ServerConfig, DocumentationResponse, ToolSelection } from '@/types/types';
 import { fetchToolDocumentation } from './controllers/docs';
 
 const config: ServerConfig = {
@@ -16,10 +17,10 @@ export function startMCPServer() {
   app.use(express.json());
 
   // Create HTTP server
-  const server = createServer(app);
+  const server = http.createServer(app);
 
   // Create WebSocket server
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocket.Server({ server });
 
   // WebSocket connection handling
   wss.on('connection', (ws) => {

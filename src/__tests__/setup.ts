@@ -1,5 +1,5 @@
 import { afterAll, beforeAll } from 'vitest';
-import { startMCPServer } from '../server';
+import { startMCPServer } from '@server/index';
 import type { Server } from 'http';
 
 let server: Server;

@@ -6,7 +6,15 @@ const baseConfig = {
   mode: 'none',
   devtool: 'nosources-source-map',
   resolve: {
-    extensions: ['.ts', '.tsx', '.js', '.jsx']
+    extensions: ['.ts', '.tsx', '.js', '.jsx'],
+    alias: {
+      '@': path.resolve(__dirname, 'src'),
+      '@server': path.resolve(__dirname, 'src/server'),
+      '@panel': path.resolve(__dirname, 'src/panel'),
+      '@components': path.resolve(__dirname, 'src/panel/components'),
+      '@controllers': path.resolve(__dirname, 'src/server/controllers'),
+      '@tests': path.resolve(__dirname, 'src/__tests__')
+    }
   },
   module: {
     rules: [

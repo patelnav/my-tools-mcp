@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { ToolSelection } from '@my-tools-mcp/shared';
-import { cn } from '../../utils/cn';
+import { ToolSelection } from '@/types/types';
+import { cn } from '@/utils/cn';
 
 interface ToolSelectorProps {
   onSelect: (tool: ToolSelection) => void;

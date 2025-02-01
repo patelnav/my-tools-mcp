@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import WebSocket from 'ws';
-import { DocumentationResponse } from '@my-tools-mcp/shared';
+import { DocumentationResponse } from '@/types';
 
 describe('MCP Server Integration', () => {
   it('should connect to the WebSocket server', () => {

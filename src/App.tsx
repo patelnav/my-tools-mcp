@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ToolDocumentation } from '@my-tools-mcp/shared'
+import { ToolDocumentation } from '@/types'
+import React from 'react'
 
 function App() {
   const [selectedTool, setSelectedTool] = useState<string | null>(null)

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { DocumentationResponse, ToolSelection } from '@my-tools-mcp/shared';
-import { cn } from '../utils/cn';
+import { DocumentationResponse, ToolSelection } from '@/types/types';
+import { cn } from '@/utils/cn';
 import { ToolSelector } from './components/ToolSelector';
 
 declare const acquireVsCodeApi: () => {
