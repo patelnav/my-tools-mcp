@@ -4,15 +4,13 @@
  * Provides consistent logging functionality with test mode awareness.
  */
 
+import { env, shouldLog } from '@/env';
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 class Logger {
-  private isTestMode(): boolean {
-    return process.env.NODE_ENV === 'test';
-  }
-
   private log(level: LogLevel, message: string, ...args: any[]): void {
-    if (this.isTestMode()) return;
+    if (!shouldLog()) return;
 
     const timestamp = new Date().toISOString();
     const prefix = `[${timestamp}] [${level.toUpperCase()}]`;

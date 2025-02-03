@@ -24,6 +24,9 @@ export default defineConfig({
     setupFiles: ['src/__tests__/setup.ts'],
     // Environment
     environment: 'node',
+    // Include only server/backend tests
+    include: ['src/__tests__/**/*.test.ts'],
+    exclude: ['src/test/**/*', '**/node_modules/**', '.vscode-test/**']
   },
   resolve: {
     alias: {
@@ -31,6 +34,7 @@ export default defineConfig({
       '@server': path.resolve(__dirname, './src/server'),
       '@panel': path.resolve(__dirname, './src/panel'),
       '@utils': path.resolve(__dirname, './src/utils'),
+      '@test': path.resolve(__dirname, './src/__tests__'),
     },
   },
 }); 

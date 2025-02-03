@@ -5,6 +5,9 @@ node_modules/
 # Build outputs
 dist/
 build/
+out/
+out/__tests__/
+.vscode-test/
 
 # IDE and editor files
 .vscode/
@@ -34,6 +37,11 @@ Thumbs.db
 
 # Coverage directory
 coverage/
+.nyc_output/
+
+# Test outputs
+test-results/
+playwright-report/
 
 # Temporary files
 *.swp

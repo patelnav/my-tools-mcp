@@ -5,6 +5,7 @@ import { TEST_CONFIG } from './test-config';
 import type { Server } from 'http';
 import path from 'path';
 import fs from 'fs';
+import { ToolInfo } from '@server/controllers/docs/path-scanner';
 
 describe('MCP Server Integration', () => {
   let server: Server;
@@ -147,8 +148,24 @@ describe('MCP Server Integration', () => {
     })
   );
 
-  it('should fetch git documentation', () =>
+  it('should discover and fetch git documentation', () =>
     createWebSocketTest(async (ws) => {
+      // First discover tools
+      ws.send(JSON.stringify({
+        type: 'DISCOVER_TOOLS',
+        payload: { projectPath: process.cwd() }
+      }));
+
+      // Wait for tool discovery
+      await expectMessage(ws, 'TOOLS_DISCOVERED', (message) => {
+        const tools = message.payload as ToolInfo[];
+        expect(tools).toContainEqual(expect.objectContaining({
+          name: 'git',
+          type: 'workspace-bin'
+        }));
+      });
+
+      // Then select git for documentation
       selectTool(ws, 'git');
       await expectMessage(ws, 'DOCUMENTATION_UPDATED', (message) => {
         const doc = message.payload as DocumentationResponse;
@@ -163,11 +180,22 @@ describe('MCP Server Integration', () => {
 
   it('should handle invalid tool gracefully', () =>
     createWebSocketTest(async (ws) => {
+      // First try to discover tools
+      ws.send(JSON.stringify({
+        type: 'DISCOVER_TOOLS',
+        payload: { projectPath: process.cwd() }
+      }));
+
+      // Wait for tool discovery
+      await expectMessage(ws, 'TOOLS_DISCOVERED');
+
+      // Then try an invalid tool
       selectTool(ws, 'nonexistenttool');
       await expectMessage(ws, 'DOCUMENTATION_UPDATED', (message) => {
         const doc = message.payload as DocumentationResponse;
         expect(doc.success).toBe(false);
         expect(doc.error).toBeDefined();
+        expect(doc.error).toContain('not found');
       });
     })
   );
@@ -408,4 +436,27 @@ describe('MCP Server Integration', () => {
       });
     });
   });
+
+  it('should cache documentation results', () =>
+    createWebSocketTest(async (ws) => {
+      // First discover tools
+      ws.send(JSON.stringify({
+        type: 'DISCOVER_TOOLS',
+        payload: { projectPath: process.cwd() }
+      }));
+
+      // Wait for tool discovery
+      await expectMessage(ws, 'TOOLS_DISCOVERED');
+
+      // Request git docs twice
+      selectTool(ws, 'git');
+      const firstResponse = await expectMessage(ws, 'DOCUMENTATION_UPDATED');
+      
+      selectTool(ws, 'git');
+      const secondResponse = await expectMessage(ws, 'DOCUMENTATION_UPDATED');
+
+      // Should get same lastUpdated timestamp (from cache)
+      expect(firstResponse.payload.data?.lastUpdated).toBe(secondResponse.payload.data?.lastUpdated);
+    })
+  );
 }); 

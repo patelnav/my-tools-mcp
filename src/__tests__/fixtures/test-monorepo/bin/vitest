@@ -1,0 +1,20 @@
+#!/bin/sh
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+  echo "vitest - Next Generation Testing Framework"
+  echo ""
+  echo "Usage: vitest [command] [options]"
+  echo ""
+  echo "Commands:"
+  echo "  run         Run tests"
+  echo "  watch       Watch mode"
+  echo "  ui          Open UI"
+  exit 0
+fi
+
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "1.0.0"
+  exit 0
+fi
+
+echo "Unknown vitest command"
+exit 1 

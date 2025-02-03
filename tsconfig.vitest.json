@@ -1,0 +1,16 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "module": "ESNext",
+        "target": "ES2020",
+        "outDir": "out/__tests__",
+        "sourceMap": true,
+        "strict": true,
+        "rootDir": "src",
+        "types": ["vitest/globals", "node"],
+        "moduleResolution": "bundler"
+    },
+    "include": [
+        "src/__tests__/**/*"
+    ]
+} 

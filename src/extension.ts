@@ -3,6 +3,7 @@ import { startMCPServer, setLogCallback } from './server';
 import { MyToolsPanel } from './panel/MyToolsPanel';
 import http from 'http';
 import { AddressInfo } from 'net';
+import * as path from 'path';
 
 let mcpServer: http.Server | undefined;
 let serverPromise: Promise<http.Server> | undefined;
@@ -20,6 +21,24 @@ let isDebugInitialized = false;
 // Add these constants at the top with other constants
 const MCP_PORT_START = 54321;
 const MCP_PORT_END = 54421;
+
+// Test environment detection
+const isTestEnvironment = process.env.VSCODE_TEST === '1';
+
+function getWorkspacePath(): string {
+    if (isTestEnvironment) {
+        // In test environment, use the test-monorepo path
+        return path.resolve(__dirname, '../__tests__/fixtures/test-monorepo');
+    }
+    
+    // In normal environment, use workspace folders
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (workspaceFolders && workspaceFolders.length > 0) {
+        return workspaceFolders[0].uri.fsPath;
+    }
+    
+    return process.cwd();
+}
 
 function log(message: string, type: 'info' | 'error' | 'warn' = 'info') {
   // Always log to console regardless of debug mode
@@ -149,11 +168,12 @@ async function findExistingServer(): Promise<number | undefined> {
   
   for (let port = MCP_PORT_START; port <= MCP_PORT_END; port++) {
     if (await checkPortInUse(port)) {
-      log(`Found existing MCP server on port ${port}`);
+      log(`Found existing server on port ${port}`);
       return port;
     }
   }
   
+  log('No existing server found');
   return undefined;
 }
 
@@ -209,7 +229,7 @@ async function tryStartServer(): Promise<number> {
     }
     
     // Get workspace path
-    const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const workspacePath = getWorkspacePath();
     if (!workspacePath) {
       log('No workspace folder found, using current working directory', 'warn');
     }
@@ -220,14 +240,17 @@ async function tryStartServer(): Promise<number> {
     
     // Add timeout to server startup
     const timeoutPromise = new Promise<http.Server>((_, reject) => {
-      setTimeout(() => reject(new Error('Server startup timed out after 10s')), 10000);
+      setTimeout(() => reject(new Error('Server startup timed out after 30s')), 30000); // Increased timeout
     });
     
+    log('Waiting for server to start...');
     mcpServer = await Promise.race([serverPromise, timeoutPromise]);
     
     if (!mcpServer) {
       throw new Error('Server failed to start - server instance is undefined');
     }
+    
+    log('Server instance created, waiting for listening event...');
     
     // Wait for server to be ready
     await new Promise<void>((resolve, reject) => {
@@ -237,12 +260,20 @@ async function tryStartServer(): Promise<number> {
       }
       
       if (mcpServer.listening) {
+        log('Server is already listening');
         resolve();
         return;
       }
       
-      mcpServer.once('listening', () => resolve());
-      mcpServer.once('error', (err) => reject(err));
+      log('Setting up server event listeners...');
+      mcpServer.once('listening', () => {
+        log('Server listening event received');
+        resolve();
+      });
+      mcpServer.once('error', (err) => {
+        log(`Server error event received: ${err}`, 'error');
+        reject(err);
+      });
     });
     
     const serverPort = getServerPort(mcpServer);
@@ -253,6 +284,7 @@ async function tryStartServer(): Promise<number> {
     }
     
     // Verify server is actually listening
+    log('Verifying server health...');
     const isListening = await checkServerHealth();
     if (!isListening) {
       throw new Error(`Server started but not responding on port ${serverPort}`);
@@ -303,6 +335,7 @@ async function tryStartServer(): Promise<number> {
         mcpServer = undefined;
       }
       
+      log(`Retrying server start in ${RETRY_DELAY}ms...`);
       return new Promise((resolve) => {
         setTimeout(() => {
           tryStartServer().then(resolve).catch((retryError) => {
@@ -320,56 +353,106 @@ async function tryStartServer(): Promise<number> {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
-  log('MCP Tools extension is activating');
-  
-  // Initialize debug mode first
-  const debugInitialized = setupDebugMode(context);
-  if (!debugInitialized) {
-    console.warn('Debug mode initialization failed, continuing without debug features');
-  }
+    log('MCP Tools extension is activating');
+    
+    // Initialize debug mode
+    setupDebugMode(context);
+    
+    // Create status bar item for server status
+    serverStatusItem = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Left,
+        100
+    );
+    serverStatusItem.text = "$(sync~spin) MCP: Starting...";
+    serverStatusItem.tooltip = "MCP Server Status";
+    serverStatusItem.show();
+    context.subscriptions.push(serverStatusItem);
 
-  // Connect server logging to our debug system
-  setLogCallback(log);
+    // Set up logging callback
+    setLogCallback(log);
 
-  try {
-    // Start server and get port
-    const serverPort = await tryStartServer();
-    if (!serverPort) {
-      throw new Error('Failed to get server port');
-    }
-
-    // Register commands
-    let disposables = [
-      vscode.commands.registerCommand('mcpTools.openPanel', () => {
-        log('Opening MCP Tools panel');
-        MyToolsPanel.createOrShow(context.extensionUri, serverPort);
-      }),
-
-      vscode.commands.registerCommand('mcpTools.copyUrl', () => {
-        if (!mcpServer) {
-          vscode.window.showErrorMessage('MCP server is not running');
-          return;
+    // Create exports object with getWebviewPanel function
+    const exports = {
+        getWebviewPanel: () => {
+            const panel = MyToolsPanel.getWebviewPanel();
+            if (!panel) {
+                log('Warning: getWebviewPanel returned null', 'warn');
+            }
+            return panel;
+        },
+        getServerPort: () => {
+            const port = getServerPort(mcpServer);
+            if (!port) {
+                log('Warning: getServerPort returned null', 'warn');
+            }
+            return port;
         }
-        const serverPort = getServerPort(mcpServer);
-        if (!serverPort) {
-          vscode.window.showErrorMessage('Could not determine server port');
-          return;
-        }
-        vscode.env.clipboard.writeText(`http://localhost:${serverPort}`).then(() => {
-          log('MCP URL copied to clipboard');
-          vscode.window.showInformationMessage('MCP URL copied to clipboard');
-        });
-      })
-    ];
+    };
 
-    if (serverStatusItem) {
-      disposables.push(serverStatusItem);
+    try {
+        // Register commands
+        context.subscriptions.push(
+            vscode.commands.registerCommand('mcpTools.openPanel', async () => {
+                try {
+                    // Create panel first without server port
+                    await MyToolsPanel.createOrShow(context.extensionUri);
+                    
+                    // Panel will request workspace path and then we'll start server
+                    const panel = MyToolsPanel.getWebviewPanel();
+                    if (!panel) {
+                        throw new Error('Panel not created');
+                    }
+
+                    panel.webview.onDidReceiveMessage(async (message) => {
+                        if (message.type === 'GET_WORKSPACE_PATH') {
+                            // Start server after receiving workspace path request
+                            const port = await tryStartServer();
+                            if (!port) {
+                                throw new Error('Failed to start server - no port returned');
+                            }
+                            
+                            // Verify server is healthy before proceeding
+                            const isHealthy = await checkServerHealth();
+                            if (!isHealthy) {
+                                throw new Error('Server started but health check failed');
+                            }
+                            
+                            log(`Server started successfully on port ${port}`);
+                            
+                            // Send workspace path back to panel
+                            panel.webview.postMessage({
+                                type: 'WORKSPACE_PATH',
+                                path: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
+                                serverPort: port
+                            });
+                        }
+                    });
+                } catch (error) {
+                    log(`Error opening panel: ${error}`, 'error');
+                    vscode.window.showErrorMessage(`Failed to open MCP Tools panel: ${error}`);
+                }
+            }),
+            vscode.commands.registerCommand('mcpTools.copyUrl', () => {
+                const serverPort = getServerPort(mcpServer);
+                if (serverPort) {
+                    vscode.env.clipboard.writeText(`http://localhost:${serverPort}`);
+                    vscode.window.showInformationMessage('MCP server URL copied to clipboard');
+                }
+            })
+        );
+
+        // Set up periodic health checks
+        const healthCheckInterval = setInterval(updateServerStatus, 5000);
+        context.subscriptions.push({ dispose: () => clearInterval(healthCheckInterval) });
+
+        log('Extension activated successfully');
+        return exports;
+    } catch (error) {
+        log(`Error during activation: ${error}`, 'error');
+        vscode.window.showErrorMessage(`Failed to activate MCP Tools: ${error}`);
+        // Return exports even if there was an error, to maintain the expected interface
+        return exports;
     }
-
-    context.subscriptions.push(...disposables);
-  } catch (error) {
-    console.error('Error in activate function:', error);
-  }
 }
 
 export function deactivate() {

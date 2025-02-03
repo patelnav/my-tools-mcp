@@ -11,22 +11,95 @@ A VSCode/Cursor extension that provides an integrated MCP server and UI panel fo
 - 🎨 Modern UI with Tailwind CSS
 - ⚡ Fast and responsive WebView panel
 
+## Architecture
+
+### 1. VS Code Extension (Backend)
+```
+Extension Host (src/extension.ts)
+├── Activates when VS Code starts
+├── Creates MCP Server
+│   └── Express + WebSocket Server
+└── Creates WebView Panel
+```
+
+### 2. MCP Server (Middle Layer)
+```
+MCP Server (src/server/*)
+├── WebSocket Server
+│   ├── Handles 'GET_AVAILABLE_TOOLS' messages
+│   └── Handles 'SELECT_TOOL' messages
+│
+├── Tool Discovery System
+│   ├── path-scanner.ts
+│   │   └── Finds tools in workspace (bin/, node_modules/.bin, scripts)
+│   └── package-scanner.ts
+│       └── Scans package.json for available tools
+│
+└── Tool Execution System
+    └── command-executor.ts
+        └── Executes tools with proper working directory
+```
+
+### 3. WebView Panel (Frontend)
+```
+React WebView (src/panel/*)
+├── UI Components
+│   └── Shows available tools and their docs
+│
+└── WebSocket Client
+    ├── Requests available tools
+    └── Requests tool documentation
+```
+
+### 4. Communication Flow
+```
+User opens extension
+│
+Extension activates
+├── Starts MCP Server
+│   └── Opens WebSocket on available port
+│
+└── Creates WebView Panel
+    │
+    WebView connects to WebSocket
+    │
+    ├── Sends 'GET_AVAILABLE_TOOLS'
+    │   │
+    │   MCP Server
+    │   ├── Uses path-scanner to find tools
+    │   └── Returns tool list to WebView
+    │
+    └── User selects tool
+        │
+        WebView sends 'SELECT_TOOL'
+        │
+        MCP Server
+        ├── Uses command-executor to get tool docs
+        └── Returns documentation to WebView
+```
+
 ## Project Structure
 
 ```
 my-tools-mcp/
 ├── src/                      # Source code
 │   ├── extension.ts          # Extension entry point
+│   ├── env.ts               # Environment configuration
 │   ├── server/              # Built-in MCP server
-│   │   ├── index.ts        # Server setup
-│   │   └── controllers/    # Documentation controllers
-│   ├── panel/              # WebView UI
+│   │   ├── index.ts         # Server setup and WebSocket handling
+│   │   └── controllers/     # Tool discovery and execution
+│   │       ├── docs/        # Documentation controllers
+│   │       ├── path-scanner.ts    # Tool discovery
+│   │       ├── package-scanner.ts # Package.json scanning
+│   │       └── command-executor.ts # Secure command execution
+│   ├── panel/              # WebView UI (React)
+│   │   ├── index.tsx      # WebView entry point
 │   │   ├── App.tsx        # Main React component
 │   │   └── components/    # UI components
-│   ├── types/              # Shared TypeScript types
-│   └── utils/              # Utility functions
-├── dist/                    # Compiled output
-└── tests/                   # Test files
+│   ├── types/             # Shared TypeScript types
+│   └── lib/               # Shared utilities
+├── dist/                  # Compiled output
+└── tests/                # Test files
 ```
 
 ## Development Setup
@@ -58,23 +131,23 @@ pnpm run build
 
 ## Features in Detail
 
-- **Integrated MCP Server**
-  - Built-in Express server with WebSocket support
-  - Runs on port 8080
-  - Automatic tool version detection
-  - Smart documentation caching
+- **Tool Discovery**
+  - Automatic workspace scanning
+  - Package.json script detection
+  - Binary tool detection
+  - Working directory awareness
+
+- **Documentation Retrieval**
+  - Secure command execution
+  - Version detection
+  - Help text parsing
+  - Smart caching
 
 - **Modern UI**
   - Clean, responsive design with Tailwind CSS
   - Real-time connection status
   - Error handling and feedback
   - Documentation syntax highlighting
-
-- **Tool Integration**
-  - Automatic workspace detection
-  - Support for any CLI tool with `-h` and `--version` flags
-  - Real-time updates when tool versions change
-  - Graceful handling of missing tools
 
 ## License
 

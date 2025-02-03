@@ -1,0 +1,13 @@
+#!/bin/sh
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+  echo "Usage: node [options] [ script.js ] [arguments]"
+  exit 0
+fi
+
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "v20.0.0"
+  exit 0
+fi
+
+echo "Unknown node command"
+exit 1 

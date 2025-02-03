@@ -1,0 +1,20 @@
+{
+  "name": "@test/ui",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint .",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "tsup": "^8.0.1",
+    "eslint": "^8.56.0"
+  }
+} 

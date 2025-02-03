@@ -1,0 +1,20 @@
+#!/bin/sh
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+  echo "vite - Next Generation Frontend Tooling"
+  echo ""
+  echo "Usage: vite [command] [options]"
+  echo ""
+  echo "Commands:"
+  echo "  dev         Start development server"
+  echo "  build       Build for production"
+  echo "  preview     Preview production build"
+  exit 0
+fi
+
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "5.0.0"
+  exit 0
+fi
+
+echo "Unknown vite command"
+exit 1 

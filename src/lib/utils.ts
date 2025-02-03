@@ -12,8 +12,4 @@ export function formatDate(input: string | number | Date): string {
     day: "numeric",
     year: "numeric",
   })
-}
-
-export function absoluteUrl(path: string) {
-  return `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}${path}`
 } 

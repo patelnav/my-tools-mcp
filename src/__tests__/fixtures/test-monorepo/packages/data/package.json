@@ -1,0 +1,38 @@
+{
+  "name": "@test/data",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint .",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "db:help": "drizzle-kit --help",
+    "db:generate:help": "drizzle-kit generate:sqlite --help",
+    "db:push:help": "drizzle-kit push:sqlite --help",
+    "db:studio:help": "drizzle-kit studio --help",
+    "db:check:help": "drizzle-kit check:sqlite --help",
+    "db:generate": "drizzle-kit generate:sqlite",
+    "db:push": "drizzle-kit push:sqlite",
+    "db:studio": "drizzle-kit studio",
+    "db:check": "drizzle-kit check:sqlite",
+    "clean": "rimraf .cache"
+  },
+  "dependencies": {
+    "@test/core": "workspace:*",
+    "drizzle-orm": "^0.29.0",
+    "better-sqlite3": "^9.0.0"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.20.0",
+    "@vitest/ui": "^1.2.1",
+    "@vitest/coverage-v8": "^1.2.1",
+    "tsx": "^4.7.0",
+    "tsup": "^8.0.1",
+    "eslint": "^8.56.0",
+    "rimraf": "^5.0.5",
+    "@types/better-sqlite3": "^7.6.9"
+  }
+} 

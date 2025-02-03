@@ -5,6 +5,11 @@
  * to prevent command injection and other security risks.
  */
 
+import { SECURITY_CONFIG } from './tool-types';
+import { isPackageCommandAvailable } from './package-scanner';
+import { isBinaryAvailable } from './path-scanner';
+import { logger } from './logger';
+
 // Security: Only allow documentation-related arguments
 export const ALLOWED_ARGS = new Set(['--version', '-v', '--help', '-h']);
 
@@ -26,54 +31,57 @@ export const BLACKLISTED_TOOLS = new Set([
 ]);
 
 /**
+ * Checks if a command contains dangerous patterns
+ * @param command Command to check
+ * @returns boolean
+ */
+function hasDangerousPatterns(command: string): boolean {
+  return SECURITY_CONFIG.dangerousPatterns.some(pattern => command.includes(pattern)) ||
+         [...SECURITY_CONFIG.forbiddenChars].some(char => command.includes(char));
+}
+
+/**
  * Validates a tool name for security
  * @param toolName The name of the tool to validate
- * @returns boolean indicating if the tool name is valid
+ * @param projectPath Path to the project root
+ * @returns Promise<boolean> indicating if the tool name is valid
  */
-export function validateToolName(toolName: string): boolean {
-  // Split for package manager commands (e.g., "pnpm drizzle-kit")
+export async function validateToolName(toolName: string, projectPath: string): Promise<boolean> {
+  // Basic security checks first
+  if (!toolName || typeof toolName !== 'string') {
+    return false;
+  }
+
+  // Check for dangerous patterns
+  if (hasDangerousPatterns(toolName)) {
+    logger.warn(`Tool name contains dangerous patterns: ${toolName}`);
+    return false;
+  }
+
+  // Split the command
   const parts = toolName.split(' ');
-  
-  // Check each part of the command
-  for (const part of parts) {
-    // SECURITY: Reject if part contains disallowed characters
-    if (!/^[a-zA-Z0-9@\-_.]+$/.test(part)) {
-      return false;
-    }
-    
-    // SECURITY: Also reject any variable expansions or environment references
-    if (part.includes('$(') || 
-        part.includes('${') || 
-        part.includes('`')) {
-      return false;
-    }
+  const baseCommand = parts[0];
+  const lowerBaseCommand = baseCommand.toLowerCase();
 
-    // Check against blacklist
-    if (BLACKLISTED_TOOLS.has(part.toLowerCase())) {
-      return false;
-    }
-    
-    // SECURITY: Prevent path traversal
-    if (part.includes('/') || part.includes('\\')) {
-      return false;
-    }
-    
-    // SECURITY: Disallow logical operators that could chain commands
-    if (part.includes('&&') || 
-        part.includes('||') || 
-        part.includes('|') || 
-        part.includes(';')) {
-      return false;
-    }
+  // Check against blacklist
+  if (BLACKLISTED_TOOLS.has(lowerBaseCommand)) {
+    logger.warn(`Blacklisted tool requested: ${baseCommand}`);
+    return false;
   }
 
-  // Allow common package manager commands
-  const validPrefixes = ['npm', 'pnpm', 'yarn', 'cargo', 'go', 'dotnet', 'git'];
-  if (parts.length > 1) {
-    return validPrefixes.includes(parts[0].toLowerCase());
+  // Handle package manager commands
+  if (['npm', 'pnpm', 'yarn'].includes(lowerBaseCommand)) {
+    return isPackageCommandAvailable(toolName, projectPath);
   }
 
-  return true;
+  // For direct CLI tools, check if they exist in PATH
+  // and validate the name format
+  if (!SECURITY_CONFIG.validToolNameRegex.test(baseCommand)) {
+    logger.warn(`Invalid tool name format: ${baseCommand}`);
+    return false;
+  }
+
+  return isBinaryAvailable(baseCommand);
 }
 
 /**
@@ -83,4 +91,17 @@ export function validateToolName(toolName: string): boolean {
  */
 export function validateArgs(args: string[]): boolean {
   return args.every(arg => ALLOWED_ARGS.has(arg));
+}
+
+export interface ToolInfo {
+  name: string;
+  location?: string;
+  workingDirectory?: string;
+  type?: string;
+  context?: Record<string, unknown>;
+}
+
+export async function isToolExecutable(tool: string | ToolInfo): Promise<boolean> {
+  const toolName = typeof tool === 'string' ? tool : tool.name;
+  return validateToolName(toolName, process.cwd());
 } 

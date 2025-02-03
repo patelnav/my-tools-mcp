@@ -1,13 +1,32 @@
 import * as vscode from 'vscode';
 import { getNonce } from '@/utils/getNonce';
+import * as path from 'path';
+
+// Test environment detection
+const isTestEnvironment = process.env.VSCODE_TEST === '1';
+
+function getWorkspacePath(): string {
+    if (isTestEnvironment) {
+        // In test environment, use the test-monorepo path
+        return path.resolve(__dirname, '../../__tests__/fixtures/test-monorepo');
+    }
+    
+    // In normal environment, use workspace folders
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (workspaceFolders && workspaceFolders.length > 0) {
+        return workspaceFolders[0].uri.fsPath;
+    }
+    
+    return process.cwd();
+}
 
 export class MyToolsPanel {
   public static currentPanel: MyToolsPanel | undefined;
-  private readonly _panel: vscode.WebviewPanel;
+  public readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
-  private _serverPort: number;
+  private _serverPort?: number;
 
-  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, serverPort: number) {
+  private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, serverPort?: number) {
     this._panel = panel;
     this._serverPort = serverPort;
 
@@ -31,25 +50,14 @@ export class MyToolsPanel {
         console.log('Received message from WebView:', message);
         switch (message.type) {
           case 'GET_WORKSPACE_PATH':
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            console.log('Workspace folders:', workspaceFolders);
-            if (workspaceFolders && workspaceFolders.length > 0) {
-              const path = workspaceFolders[0].uri.fsPath;
-              console.log('Sending workspace path:', path);
-              this._panel.webview.postMessage({
-                type: 'WORKSPACE_PATH',
-                path,
-                serverPort: this._serverPort
-              });
-            } else {
-              console.log('No workspace folders found');
-              this._panel.webview.postMessage({
-                type: 'WORKSPACE_PATH',
-                path: process.cwd(), // Fallback to current working directory
-                serverPort: this._serverPort
-              });
-            }
-            return;
+            const path = getWorkspacePath();
+            console.log('Sending workspace path:', path);
+            this._panel.webview.postMessage({
+              type: 'WORKSPACE_PATH',
+              path,
+              ...(this._serverPort && { serverPort: this._serverPort })
+            });
+            break;
           case 'error':
             vscode.window.showErrorMessage(message.value);
             return;
@@ -60,7 +68,7 @@ export class MyToolsPanel {
     );
   }
 
-  public static createOrShow(extensionUri: vscode.Uri, serverPort: number) {
+  public static createOrShow(extensionUri: vscode.Uri, serverPort?: number) {
     const column = vscode.window.activeTextEditor
       ? vscode.window.activeTextEditor.viewColumn
       : undefined;
@@ -68,6 +76,10 @@ export class MyToolsPanel {
     // If we already have a panel, show it
     if (MyToolsPanel.currentPanel) {
       MyToolsPanel.currentPanel._panel.reveal(column);
+      // Update server port if provided
+      if (serverPort !== undefined) {
+        MyToolsPanel.currentPanel._serverPort = serverPort;
+      }
       return;
     }
 
@@ -87,6 +99,10 @@ export class MyToolsPanel {
     );
 
     MyToolsPanel.currentPanel = new MyToolsPanel(panel, extensionUri, serverPort);
+  }
+
+  public static getWebviewPanel(): vscode.WebviewPanel | undefined {
+    return MyToolsPanel.currentPanel?._panel;
   }
 
   private _getHtmlForWebview(webview: vscode.Webview, extensionUri: vscode.Uri) {

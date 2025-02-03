@@ -1,0 +1,15 @@
+#!/bin/sh
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+  echo "git - the stupid content tracker"
+  echo ""
+  echo "usage: git [--version] [--help] [-C <path>] [-c <name>=<value>]"
+  exit 0
+fi
+
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then
+  echo "git version 2.39.2"
+  exit 0
+fi
+
+echo "Unknown git command"
+exit 1 

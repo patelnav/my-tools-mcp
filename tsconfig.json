@@ -4,6 +4,12 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "commonjs",
     "rootDir": "src",
+    "outDir": "out",
+    "sourceMap": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "jsx": "react",
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
@@ -11,15 +17,9 @@
       "@panel/*": ["src/panel/*"],
       "@components/*": ["src/panel/components/*"],
       "@controllers/*": ["src/server/controllers/*"],
-      "@tests/*": ["src/__tests__/*"]
-    },
-    "outDir": "dist",
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "jsx": "react"
+      "@test/*": ["src/__tests__/*"]
+    }
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", ".vscode-test", "dist"]
 } 

@@ -1,0 +1,23 @@
+{
+  "name": "@test/core",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "eslint .",
+    "test": "vitest",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "zod": "^3.22.4",
+    "date-fns": "^3.3.1",
+    "lodash": "^4.17.21"
+  },
+  "devDependencies": {
+    "@types/lodash": "^4.14.202",
+    "tsup": "^8.0.1",
+    "eslint": "^8.56.0",
+    "rimraf": "^5.0.5"
+  }
+} 

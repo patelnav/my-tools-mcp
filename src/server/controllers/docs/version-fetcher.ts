@@ -4,48 +4,38 @@
  * Handles fetching and parsing of tool version information.
  */
 
-import { executeCommand } from './command-executor';
-import { validateToolName } from './security';
-import { validateProjectPath } from './path-validator';
+import { executeTool } from './command-executor';
 import { logger } from './logger';
-
-const VERSION_TIMEOUT = 5000;
-const VERSION_MAX_SIZE = 10000;
+import type { ToolInfo } from './path-scanner';
 
 /**
- * Fetches the version of a tool
- * @param toolName Name of the tool
- * @param projectPath Project path
- * @returns Promise<string> Version string or 'unknown'
+ * Gets the version of a tool
+ * @param tool Tool info
+ * @param projectPath Path to execute from
+ * @returns Promise<string>
  */
-export async function getToolVersion(toolName: string, projectPath: string): Promise<string> {
+export async function getToolVersion(tool: ToolInfo, projectPath: string): Promise<string> {
   try {
-    // Validate inputs
-    if (!validateToolName(toolName)) {
-      throw new Error('Tool name not permitted');
-    }
-    if (!await validateProjectPath(projectPath)) {
-      throw new Error('Project path is invalid');
-    }
-
-    // Execute version command
-    const result = await executeCommand(toolName, ['--version'], {
-      cwd: projectPath,
-      timeout: VERSION_TIMEOUT,
-      maxOutputSize: VERSION_MAX_SIZE
+    const result = await executeTool(tool, ['--version'], {
+      timeout: 2000,
+      maxOutputSize: 1000
     });
 
-    if (result.code !== 0) {
-      logger.warn(`Version command failed for ${toolName} with code ${result.code}`);
-      return 'unknown';
+    if (result.code === 0 && result.output.trim()) {
+      return result.output.trim();
     }
 
-    // Try to extract semantic version
-    const versionText = result.output.trim();
-    const versionMatch = versionText.match(/\d+\.\d+\.\d+/);
-    return versionMatch ? versionMatch[0] : versionText;
+    // Try -v if --version fails
+    const fallbackResult = await executeTool(tool, ['-v'], {
+      timeout: 2000,
+      maxOutputSize: 1000
+    });
+
+    return fallbackResult.code === 0 && fallbackResult.output.trim()
+      ? fallbackResult.output.trim()
+      : 'Version unknown';
   } catch (error) {
-    logger.warn(`Error getting version for ${toolName}: ${error}`);
-    return 'unknown';
+    logger.warn(`Failed to get version for ${tool.name}:`, error);
+    return 'Version unknown';
   }
 } 

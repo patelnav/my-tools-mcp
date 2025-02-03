@@ -1,0 +1,244 @@
+/**
+ * Tool Scanner Module
+ * 
+ * Scans workspace to discover available command-line tools.
+ * Works in conjunction with package-scanner.ts to provide comprehensive tool discovery.
+ */
+
+import { readdir, readFile } from 'fs/promises';
+import { join, relative, dirname } from 'path';
+import { logger } from './logger';
+import { env } from '@/env';
+
+// Cache of scanned tools per workspace
+const toolCache = new Map<string, { tools: Map<string, ToolInfo>, timestamp: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+export interface ToolInfo {
+  name: string;
+  // Where the tool binary/script is located
+  location: string;
+  // Where to execute the tool from (important for relative paths/config files)
+  workingDirectory: string;
+  // How to execute the tool
+  type: 'npm-script' | 'package-bin' | 'workspace-bin';
+  // Additional context
+  context: {
+    packageName?: string;    // For package tools
+    packagePath?: string;    // For workspace packages in monorepos
+    scriptSource?: string;   // package.json path for scripts
+  };
+}
+
+interface PackageJson {
+  name?: string;
+  scripts?: Record<string, string>;
+  bin?: Record<string, string> | string;
+  workspaces?: string[];
+}
+
+/**
+ * Checks if a file is executable based on its extension and platform
+ * @param filename Name of the file to check
+ * @returns boolean
+ */
+function isExecutable(filename: string): boolean {
+  if (process.platform === 'win32') {
+    return env.executableExtensions.some(ext => filename.toUpperCase().endsWith(ext));
+  }
+  return true; // On Unix, we trust the file permissions (handled by readdir)
+}
+
+/**
+ * Scans the workspace for available command-line tools
+ * @param workspacePath The workspace path to scan
+ * @returns Promise<Map<string, ToolInfo>> Map of tool names to their info
+ */
+export async function scanWorkspaceTools(
+  workspacePath: string
+): Promise<Map<string, ToolInfo>> {
+  // Check cache first
+  const now = Date.now();
+  const cached = toolCache.get(workspacePath);
+  
+  if (cached && (now - cached.timestamp < CACHE_TTL)) {
+    return cached.tools;
+  }
+
+  const tools = new Map<string, ToolInfo>();
+  
+  try {
+    // First scan package.json for scripts and workspaces
+    await scanPackageJson(workspacePath, tools);
+
+    // Then scan node_modules/.bin at workspace root
+    await scanNodeModulesBin(workspacePath, tools);
+
+    // Then scan workspace-specific tools
+    await scanWorkspaceBin(workspacePath, tools);
+
+    // Update cache
+    toolCache.set(workspacePath, {
+      tools,
+      timestamp: now
+    });
+
+    return tools;
+  } catch (error) {
+    logger.error('Error scanning workspace for tools:', error);
+    return new Map();
+  }
+}
+
+/**
+ * Scans package.json for scripts and workspaces
+ */
+async function scanPackageJson(
+  workspacePath: string,
+  tools: Map<string, ToolInfo>
+): Promise<void> {
+  try {
+    const pkgPath = join(workspacePath, 'package.json');
+    const pkgContent = await readFile(pkgPath, 'utf-8');
+    const pkg = JSON.parse(pkgContent) as PackageJson;
+
+    // Add npm scripts
+    if (pkg.scripts) {
+      for (const [name, script] of Object.entries(pkg.scripts)) {
+        tools.set(`npm:${name}`, {
+          name: `npm:${name}`,
+          location: pkgPath,
+          workingDirectory: workspacePath,
+          type: 'npm-script',
+          context: {
+            scriptSource: pkgPath
+          }
+        });
+      }
+    }
+
+    // Scan workspaces if present
+    if (pkg.workspaces) {
+      for (const pattern of pkg.workspaces) {
+        // Note: This is a simplified glob pattern handling
+        // In reality, you'd want to use a proper glob matcher
+        const workspacePkgPath = join(workspacePath, pattern.replace('/*', ''), 'package.json');
+        try {
+          await scanPackageJson(dirname(workspacePkgPath), tools);
+        } catch (error) {
+          logger.debug(`Error scanning workspace package: ${workspacePkgPath}`, error);
+        }
+      }
+    }
+  } catch (error) {
+    logger.debug('No package.json found or error scanning:', error);
+  }
+}
+
+/**
+ * Scans node_modules/.bin for package tools
+ */
+async function scanNodeModulesBin(
+  workspacePath: string,
+  tools: Map<string, ToolInfo>
+): Promise<void> {
+  const binPath = join(workspacePath, 'node_modules', '.bin');
+  try {
+    const files = await readdir(binPath, { withFileTypes: true });
+    for (const file of files) {
+      if (file.isFile() && isExecutable(file.name)) {
+        const name = process.platform === 'win32'
+          ? file.name.replace(/\.[^/.]+$/, '')
+          : file.name;
+        
+        tools.set(name, {
+          name,
+          location: join('node_modules', '.bin', file.name),
+          // Important: Tools in node_modules/.bin should run from workspace root
+          workingDirectory: workspacePath,
+          type: 'package-bin',
+          context: {}
+        });
+      }
+    }
+  } catch (error) {
+    logger.debug('No node_modules/.bin found or error scanning:', error);
+  }
+}
+
+/**
+ * Scans workspace bin directory for local tools
+ */
+async function scanWorkspaceBin(
+  workspacePath: string,
+  tools: Map<string, ToolInfo>
+): Promise<void> {
+  const binPath = join(workspacePath, 'bin');
+  try {
+    const files = await readdir(binPath, { withFileTypes: true });
+    for (const file of files) {
+      if (file.isFile() && isExecutable(file.name)) {
+        const name = process.platform === 'win32'
+          ? file.name.replace(/\.[^/.]+$/, '')
+          : file.name;
+        
+        tools.set(name, {
+          name,
+          location: join('bin', file.name),
+          // Important: Local tools in bin/ should run from workspace root
+          workingDirectory: workspacePath,
+          type: 'workspace-bin',
+          context: {}
+        });
+      }
+    }
+  } catch (error) {
+    logger.debug('No workspace bin directory found:', error);
+  }
+}
+
+/**
+ * Gets info about a specific tool
+ * @param workspacePath The workspace path to scan
+ * @param toolName Name of the tool to check
+ * @returns Promise<ToolInfo | undefined>
+ */
+export async function getToolInfo(
+  workspacePath: string,
+  toolName: string
+): Promise<ToolInfo | undefined> {
+  const tools = await scanWorkspaceTools(workspacePath);
+  return tools.get(toolName);
+}
+
+/**
+ * Gets a list of all available tools in the workspace
+ * @param workspacePath The workspace path to scan
+ * @returns Promise<ToolInfo[]>
+ */
+export async function getAvailableTools(
+  workspacePath: string
+): Promise<ToolInfo[]> {
+  const tools = await scanWorkspaceTools(workspacePath);
+  return [...tools.values()];
+}
+
+/**
+ * Clears the tool cache for a specific workspace
+ * @param workspacePath The workspace path to clear cache for
+ */
+export function clearToolCache(workspacePath: string): void {
+  toolCache.delete(workspacePath);
+}
+
+async function isBinaryAvailable(binaryName: string): Promise<boolean> {
+  try {
+    const tools = await scanWorkspaceTools(process.cwd());
+    return tools.has(binaryName);
+  } catch (error) {
+    logger.warn(`Error checking binary availability: ${error}`);
+    return false;
+  }
+}
+
+export { isBinaryAvailable }; 

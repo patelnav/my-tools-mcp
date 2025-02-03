@@ -11,57 +11,85 @@ declare global {
 }
 
 // Helper function to check if server is ready
-async function waitForServerReady(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const req = http.get(`http://localhost:${port}/health`, {
-      timeout: 1000
-    }, (res) => {
-      resolve(res.statusCode === 200);
-    });
+async function waitForServerReady(port: number, maxAttempts = 50): Promise<boolean> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const result = await new Promise<boolean>((resolve) => {
+        const req = http.get(`http://localhost:${port}/health`, {
+          timeout: 1000
+        }, (res) => {
+          resolve(res.statusCode === 200);
+        });
 
-    req.on('error', () => {
-      resolve(false);
-    });
-  });
+        req.on('error', () => {
+          resolve(false);
+        });
+      });
+
+      if (result) {
+        return true;
+      }
+
+      // Wait 100ms between attempts
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } catch (error) {
+      console.error('Error checking server health:', error);
+    }
+  }
+
+  return false;
 }
 
 // Helper function to close server
-async function closeServer() {
+async function closeServer(timeout = 5000): Promise<void> {
   if (!global.__test_server__) return;
   
-  return new Promise<void>((resolve) => {
-    // Force close any remaining connections immediately
-    global.__test_server__?.getConnections((err, count) => {
-      if (err) {
-        console.error('Error getting connections:', err);
-      } else if (count > 0) {
-        console.log(`Forcing close of ${count} remaining connections`);
-        const listeners = global.__test_server__?.listeners('connection') as ((...args: any[]) => void)[];
-        listeners.forEach(listener => {
-          global.__test_server__?.removeListener('connection', listener);
-        });
+  return new Promise<void>((resolve, reject) => {
+    const forceCloseTimeout = setTimeout(() => {
+      console.warn('Force closing server - timeout reached');
+      try {
+        global.__test_server__?.close();
+      } catch (error) {
+        console.error('Error force closing server:', error);
       }
-    });
-    
-    const closeTimeout = setTimeout(() => {
-      console.log('Force closing server - timeout reached');
       global.__test_server__ = undefined;
       resolve();
-    }, 500);
+    }, timeout);
 
-    global.__test_server__?.close(() => {
-      clearTimeout(closeTimeout);
-      global.__test_server__ = undefined;
-      resolve();
-    });
+    try {
+      // Force close any remaining connections
+      global.__test_server__?.getConnections((err, count) => {
+        if (err) {
+          console.error('Error getting connections:', err);
+        } else if (count > 0) {
+          console.log(`Closing ${count} remaining connections`);
+          const listeners = global.__test_server__?.listeners('connection') as ((...args: any[]) => void)[];
+          listeners.forEach(listener => {
+            global.__test_server__?.removeListener('connection', listener);
+          });
+        }
+      });
+
+      global.__test_server__?.close(() => {
+        clearTimeout(forceCloseTimeout);
+        global.__test_server__ = undefined;
+        resolve();
+      });
+    } catch (error) {
+      clearTimeout(forceCloseTimeout);
+      console.error('Error closing server:', error);
+      reject(error);
+    }
   });
 }
 
-async function setupServer() {
+async function setupServer(): Promise<Server> {
   console.log('Setting up test server...');
   
   // Always start with a clean server
   await closeServer();
+  
+  // Disable logging during tests
   setLogCallback(() => {});
   
   const config = await initTestConfig();
@@ -92,7 +120,7 @@ async function setupServer() {
         clearTimeout(timeoutId);
         resolve();
       } else {
-        setTimeout(checkReady, 100);
+        reject(new Error('Server health check failed'));
       }
     };
 
@@ -105,12 +133,12 @@ async function setupServer() {
   return server;
 }
 
-// Set up fresh server before each test
-beforeEach(async () => {
+// Set up fresh server before all tests
+beforeAll(async () => {
   await setupServer();
-}, 10000);
+}, 15000);
 
-// Clean up after each test
-afterEach(async () => {
+// Clean up after all tests
+afterAll(async () => {
   await closeServer();
 }, 5000); 

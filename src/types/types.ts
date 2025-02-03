@@ -17,6 +17,21 @@ export interface ServerConfig {
 
 export interface DocumentationResponse {
   success: boolean;
-  data?: ToolDocumentation;
+  data?: {
+    name: string;
+    version: string;
+    helpText: string;
+    lastUpdated: number;
+  };
   error?: string;
+}
+
+export type CommandType = 'script' | 'tool' | 'package-manager';
+
+export interface Command {
+  command: string;
+  description: string;
+  package?: string;
+  type: CommandType;
+  group?: string;
 } 
