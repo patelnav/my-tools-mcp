@@ -7,7 +7,7 @@
 
 import { readdir, readFile } from 'fs/promises';
 import { join, relative, dirname } from 'path';
-import { logger } from './logger';
+import { logger } from '@server/controllers/docs/logger';
 import { env } from '@/env';
 
 // Cache of scanned tools per workspace
@@ -15,19 +15,14 @@ const toolCache = new Map<string, { tools: Map<string, ToolInfo>, timestamp: num
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 export interface ToolInfo {
+  // Required fields
   name: string;
-  // Where the tool binary/script is located
-  location: string;
-  // Where to execute the tool from (important for relative paths/config files)
-  workingDirectory: string;
-  // How to execute the tool
-  type: 'npm-script' | 'package-bin' | 'workspace-bin';
-  // Additional context
-  context: {
-    packageName?: string;    // For package tools
-    packagePath?: string;    // For workspace packages in monorepos
-    scriptSource?: string;   // package.json path for scripts
-  };
+  type: 'script' | 'npm-script' | 'package-bin' | 'workspace-bin' | 'global-bin';
+  
+  // Optional fields
+  location?: string;
+  workingDirectory?: string;
+  context?: Record<string, unknown>;
 }
 
 interface PackageJson {
@@ -50,6 +45,31 @@ function isExecutable(filename: string): boolean {
 }
 
 /**
+ * Scans PATH for globally available tools
+ */
+async function scanGlobalBinaries(
+  tools: Map<string, ToolInfo>
+): Promise<void> {
+  // Get PATH directories
+  const pathDirs = (process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':');
+  
+  // Common global tools to look for
+  const commonTools = ['git', 'node', 'npm', 'yarn', 'pnpm'];
+  
+  for (const tool of commonTools) {
+    // Don't override tools already found in workspace
+    if (!tools.has(tool)) {
+      tools.set(tool, {
+        name: tool,
+        type: 'global-bin',
+        workingDirectory: process.cwd(),
+        context: {}
+      });
+    }
+  }
+}
+
+/**
  * Scans the workspace for available command-line tools
  * @param workspacePath The workspace path to scan
  * @returns Promise<Map<string, ToolInfo>> Map of tool names to their info
@@ -57,11 +77,14 @@ function isExecutable(filename: string): boolean {
 export async function scanWorkspaceTools(
   workspacePath: string
 ): Promise<Map<string, ToolInfo>> {
+  logger.debug('Scanning workspace for tools:', { workspacePath });
+  
   // Check cache first
   const now = Date.now();
   const cached = toolCache.get(workspacePath);
   
   if (cached && (now - cached.timestamp < CACHE_TTL)) {
+    logger.debug('Using cached tools:', { tools: [...cached.tools.entries()] });
     return cached.tools;
   }
 
@@ -69,13 +92,24 @@ export async function scanWorkspaceTools(
   
   try {
     // First scan package.json for scripts and workspaces
+    logger.debug('Scanning package.json...');
     await scanPackageJson(workspacePath, tools);
+    logger.debug('After package.json scan:', { tools: [...tools.entries()] });
 
     // Then scan node_modules/.bin at workspace root
+    logger.debug('Scanning node_modules/.bin...');
     await scanNodeModulesBin(workspacePath, tools);
+    logger.debug('After node_modules/.bin scan:', { tools: [...tools.entries()] });
 
     // Then scan workspace-specific tools
+    logger.debug('Scanning workspace bin directory...');
     await scanWorkspaceBin(workspacePath, tools);
+    logger.debug('After workspace bin scan:', { tools: [...tools.entries()] });
+
+    // Finally scan for global tools
+    logger.debug('Scanning for global tools...');
+    await scanGlobalBinaries(tools);
+    logger.debug('After global tools scan:', { tools: [...tools.entries()] });
 
     // Update cache
     toolCache.set(workspacePath, {
@@ -146,7 +180,8 @@ async function scanNodeModulesBin(
   try {
     const files = await readdir(binPath, { withFileTypes: true });
     for (const file of files) {
-      if (file.isFile() && isExecutable(file.name)) {
+      // Handle both regular files and symlinks
+      if ((file.isFile() || file.isSymbolicLink()) && isExecutable(file.name)) {
         const name = process.platform === 'win32'
           ? file.name.replace(/\.[^/.]+$/, '')
           : file.name;
@@ -174,26 +209,52 @@ async function scanWorkspaceBin(
   tools: Map<string, ToolInfo>
 ): Promise<void> {
   const binPath = join(workspacePath, 'bin');
+  logger.debug('Scanning workspace bin directory:', { binPath, workspacePath });
   try {
     const files = await readdir(binPath, { withFileTypes: true });
+    logger.debug('Found files in bin directory:', files.map(f => ({ name: f.name, type: f.isFile() ? 'file' : f.isSymbolicLink() ? 'symlink' : 'other' })));
+    
     for (const file of files) {
-      if (file.isFile() && isExecutable(file.name)) {
+      // Handle both regular files and symlinks
+      if ((file.isFile() || file.isSymbolicLink()) && isExecutable(file.name)) {
         const name = process.platform === 'win32'
           ? file.name.replace(/\.[^/.]+$/, '')
           : file.name;
         
-        tools.set(name, {
+        const location = join(binPath, file.name);
+        logger.debug(`Found workspace binary: ${name}`, { 
           name,
-          location: join('bin', file.name),
-          // Important: Local tools in bin/ should run from workspace root
-          workingDirectory: workspacePath,
-          type: 'workspace-bin',
-          context: {}
+          location,
+          isFile: file.isFile(),
+          isSymlink: file.isSymbolicLink(),
+          isExecutable: isExecutable(file.name)
+        });
+        
+        // Don't override tools already found in node_modules/.bin
+        if (!tools.has(name)) {
+          tools.set(name, {
+            name,
+            location,
+            // Important: Local tools in bin/ should run from workspace root
+            workingDirectory: workspacePath,
+            type: 'workspace-bin',
+            context: {}
+          });
+          logger.debug(`Added workspace binary to tools:`, tools.get(name));
+        } else {
+          logger.debug(`Skipping workspace binary (already exists):`, name);
+        }
+      } else {
+        logger.debug(`Skipping non-executable or non-file:`, {
+          name: file.name,
+          isFile: file.isFile(),
+          isSymlink: file.isSymbolicLink(),
+          isExecutable: isExecutable(file.name)
         });
       }
     }
   } catch (error) {
-    logger.debug('No workspace bin directory found:', error);
+    logger.debug('Error scanning workspace bin directory:', { error, binPath });
   }
 }
 
@@ -231,9 +292,15 @@ export function clearToolCache(workspacePath: string): void {
   toolCache.delete(workspacePath);
 }
 
-async function isBinaryAvailable(binaryName: string): Promise<boolean> {
+/**
+ * Checks if a binary is available in the workspace
+ * @param binaryName Name of the binary to check
+ * @param projectPath Path to the project root (defaults to process.cwd())
+ * @returns Promise<boolean>
+ */
+async function isBinaryAvailable(binaryName: string, projectPath: string = process.cwd()): Promise<boolean> {
   try {
-    const tools = await scanWorkspaceTools(process.cwd());
+    const tools = await scanWorkspaceTools(projectPath);
     return tools.has(binaryName);
   } catch (error) {
     logger.warn(`Error checking binary availability: ${error}`);

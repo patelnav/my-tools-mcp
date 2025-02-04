@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import WebSocket from 'ws';
-import { DocumentationResponse } from '@/types';
+import { DocumentationResponse } from '../types/types';
 import { TEST_CONFIG } from './test-config';
 import type { Server } from 'http';
 import path from 'path';
 import fs from 'fs';
-import { ToolInfo } from '@server/controllers/docs/path-scanner';
+import { ToolInfo } from '../server/controllers/docs/path-scanner';
+import { logger } from '../server/controllers/docs/logger';
+import { AddressInfo } from 'net';
 
 describe('MCP Server Integration', () => {
   let server: Server;
@@ -108,11 +110,12 @@ describe('MCP Server Integration', () => {
 
   // Helper function to send a tool selection message
   const selectTool = (ws: WebSocket, toolName: string) => {
+    const testMonorepoPath = path.join(__dirname, 'fixtures', 'test-monorepo');
     ws.send(JSON.stringify({
       type: 'SELECT_TOOL',
       payload: {
         name: toolName,
-        projectPath: process.cwd()
+        projectPath: testMonorepoPath
       }
     }));
   };
@@ -150,31 +153,49 @@ describe('MCP Server Integration', () => {
 
   it('should discover and fetch git documentation', () =>
     createWebSocketTest(async (ws) => {
-      // First discover tools
-      ws.send(JSON.stringify({
-        type: 'DISCOVER_TOOLS',
-        payload: { projectPath: process.cwd() }
-      }));
-
-      // Wait for tool discovery
-      await expectMessage(ws, 'TOOLS_DISCOVERED', (message) => {
-        const tools = message.payload as ToolInfo[];
-        expect(tools).toContainEqual(expect.objectContaining({
-          name: 'git',
-          type: 'workspace-bin'
+      const testMonorepoPath = path.join(__dirname, 'fixtures', 'test-monorepo');
+      
+      // Temporarily enable logging for this test
+      const originalShouldLog = process.env.SHOULD_LOG;
+      process.env.SHOULD_LOG = 'true';
+      
+      try {
+        logger.debug('Test monorepo path:', testMonorepoPath);
+        
+        // First discover tools
+        logger.debug('Sending DISCOVER_TOOLS message...');
+        ws.send(JSON.stringify({
+          type: 'DISCOVER_TOOLS',
+          payload: { projectPath: testMonorepoPath }
         }));
-      });
 
-      // Then select git for documentation
-      selectTool(ws, 'git');
-      await expectMessage(ws, 'DOCUMENTATION_UPDATED', (message) => {
-        const doc = message.payload as DocumentationResponse;
-        expect(doc.success).toBe(true);
-        expect(doc.data).toBeDefined();
-        expect(doc.data?.name).toBe('git');
-        expect(doc.data?.version).toBeDefined();
-        expect(doc.data?.helpText).toBeDefined();
-      });
+        // Wait for tool discovery
+        logger.debug('Waiting for TOOLS_DISCOVERED message...');
+        await expectMessage(ws, 'TOOLS_DISCOVERED', (message) => {
+          logger.debug('Received TOOLS_DISCOVERED message:', message);
+          const tools = message.payload as ToolInfo[];
+          expect(tools).toContainEqual(expect.objectContaining({
+            name: 'git',
+            type: 'workspace-bin'
+          }));
+        });
+
+        // Then select git for documentation
+        logger.debug('Sending SELECT_TOOL message for git...');
+        selectTool(ws, 'git');
+        await expectMessage(ws, 'DOCUMENTATION_UPDATED', (message) => {
+          logger.debug('Received DOCUMENTATION_UPDATED message:', message);
+          const doc = message.payload as DocumentationResponse;
+          expect(doc.success).toBe(true);
+          expect(doc.data).toBeDefined();
+          expect(doc.data?.name).toBe('git');
+          expect(doc.data?.version).toBeDefined();
+          expect(doc.data?.helpText).toBeDefined();
+        });
+      } finally {
+        // Restore original logging state
+        process.env.SHOULD_LOG = originalShouldLog;
+      }
     })
   );
 
@@ -195,7 +216,7 @@ describe('MCP Server Integration', () => {
         const doc = message.payload as DocumentationResponse;
         expect(doc.success).toBe(false);
         expect(doc.error).toBeDefined();
-        expect(doc.error).toContain('not found');
+        expect(doc.error).toContain('Invalid tool name');
       });
     })
   );

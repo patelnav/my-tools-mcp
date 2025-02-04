@@ -59,6 +59,11 @@ class EnvironmentManager {
    * Should we log messages?
    */
   get shouldLog(): boolean {
+    // Allow explicit override via environment variable
+    if (process.env.SHOULD_LOG) {
+      return process.env.SHOULD_LOG === 'true';
+    }
+    // Otherwise use default behavior
     return !this.isTestMode;
   }
 

@@ -5,8 +5,9 @@
  */
 
 import { spawn } from 'child_process';
-import { logger } from './logger';
+import { logger } from '@server/controllers/docs/logger';
 import { ToolInfo } from './path-scanner';
+import { join } from 'path';
 
 interface CommandOptions {
   cwd: string;
@@ -38,10 +39,17 @@ export async function executeTool(
   let command: string;
   let finalArgs: string[] = [...args];
   const finalOptions: CommandOptions = {
-    cwd: tool.workingDirectory,
+    cwd: tool.workingDirectory || process.cwd(), // Use process.cwd() as fallback
     timeout: options.timeout || 5000,
     maxOutputSize: options.maxOutputSize || 50000
   };
+
+  logger.debug('Executing tool:', {
+    tool,
+    args,
+    options: finalOptions,
+    currentDir: process.cwd()
+  });
 
   switch (tool.type) {
     case 'npm-script':
@@ -51,7 +59,13 @@ export async function executeTool(
     
     case 'package-bin':
     case 'workspace-bin':
-      command = tool.name;
+      command = tool.location || tool.name;
+      logger.debug('Resolved command path:', {
+        command,
+        location: tool.location,
+        name: tool.name,
+        exists: require('fs').existsSync(command)
+      });
       break;
     
     default:
@@ -78,7 +92,15 @@ async function executeCommand(
 
   return new Promise<CommandResult>((resolve, reject) => {
     try {
-      logger.debug(`Executing command: ${command} ${args.join(' ')} in ${options.cwd}`);
+      logger.debug('Executing command:', {
+        command,
+        args,
+        cwd: options.cwd,
+        timeout,
+        maxOutputSize,
+        currentDir: process.cwd(),
+        commandExists: require('fs').existsSync(command)
+      });
       
       const child = spawn(command, args, {
         cwd: options.cwd,
@@ -90,40 +112,52 @@ async function executeCommand(
       let error = '';
 
       child.stdout.on('data', (data) => {
-        // Security: Limit output size
-        if (output.length > maxOutputSize) {
-          child.kill();
-          reject(new Error('Output exceeds size limit'));
-          return;
+        const chunk = data.toString();
+        logger.debug('Command stdout:', chunk);
+        if (output.length + chunk.length <= maxOutputSize) {
+          output += chunk;
         }
-        output += data.toString();
       });
 
       child.stderr.on('data', (data) => {
-        error += data.toString();
+        const chunk = data.toString();
+        logger.debug('Command stderr:', chunk);
+        error += chunk;
       });
 
-      child.on('close', (code: number | null) => {
-        // Some tools output help to stderr, so we'll use either
-        const finalOutput = output || error;
-        resolve({
-          output: finalOutput.slice(0, maxOutputSize),
-          code: code ?? 1 // Use 1 as default error code if null
+      child.on('error', (err: CommandError) => {
+        logger.error('Command error:', {
+          error: err,
+          code: err.code,
+          command,
+          args,
+          cwd: options.cwd
         });
-      });
-
-      child.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'ENOENT') {
-          reject(new Error(`Command not found: ${command}. Please ensure it is installed and available in your PATH.`));
-        } else if (err.code === 'EACCES') {
-          reject(new Error(`Permission denied executing command: ${command}. Please check file permissions.`));
-        } else if (err.code === 'ETIMEDOUT') {
-          reject(new Error(`Command timed out after ${timeout}ms: ${command}`));
+          reject(new Error(`Command not found: ${command}`));
         } else {
           reject(err);
         }
       });
+
+      child.on('close', (code) => {
+        logger.debug('Command completed:', { 
+          code, 
+          output, 
+          error,
+          command,
+          args,
+          cwd: options.cwd
+        });
+        resolve({ output: output || error, code: code || 0 });
+      });
     } catch (error) {
+      logger.error('Failed to execute command:', {
+        error,
+        command,
+        args,
+        cwd: options.cwd
+      });
       reject(error);
     }
   });
@@ -137,19 +171,38 @@ export { executeCommand };
  * @returns Promise<boolean>
  */
 export async function isToolExecutable(tool: ToolInfo): Promise<boolean> {
+  if (!tool.name) {
+    logger.debug('Tool name is undefined');
+    return false;
+  }
+
   try {
-    // For npm scripts, check if the script exists in package.json
-    if (tool.type === 'npm-script') {
-      return true; // We assume it exists since we got it from package.json
+    // For scripts, we don't need to check executability
+    if (tool.type === 'script' || tool.type === 'npm-script') {
+      return true; // Scripts are always "executable" since they're defined in package.json
     }
 
-    // For other tools, try running with --version
-    const result = await executeTool(tool, ['--version'], {
-      timeout: 2000,
-      maxOutputSize: 1000
-    });
-    
-    return result.code === 0;
+    // For binaries and tools, check if they're actually executable
+    if (tool.type === 'package-bin' || tool.type === 'workspace-bin' || tool.type === 'global-bin') {
+      // Try running with --version first (less output than --help)
+      const result = await executeTool(tool, ['--version'], {
+        timeout: 2000,
+        maxOutputSize: 1000
+      });
+      
+      if (result.code === 0) return true;
+
+      // If --version fails, try -v as fallback
+      const fallbackResult = await executeTool(tool, ['-v'], {
+        timeout: 2000,
+        maxOutputSize: 1000
+      });
+
+      return fallbackResult.code === 0;
+    }
+
+    // For unknown types, assume not executable
+    return false;
   } catch (error) {
     logger.debug(`Tool not executable: ${tool.name}`, error);
     return false;

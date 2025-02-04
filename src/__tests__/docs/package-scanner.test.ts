@@ -1,21 +1,33 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { join } from 'path';
-import { scanWorkspaceTools, getToolInfo, type ToolInfo } from '../../server/controllers/docs/path-scanner';
+import { scanWorkspaceTools, getToolInfo, type ToolInfo, clearToolCache } from '../../server/controllers/docs/path-scanner';
+import { env } from '@/env';
 
 const MONOREPO_ROOT = join(__dirname, '../fixtures/test-monorepo');
 const MOCK_BIN_PATH = join(MONOREPO_ROOT, 'bin');
+const NODE_MODULES_BIN = join(MONOREPO_ROOT, 'node_modules', '.bin');
 
 describe('Package Scanner', () => {
   const originalPath = process.env.PATH;
+  const originalNodeEnv = process.env.NODE_ENV;
 
   beforeAll(() => {
-    // Add mock binaries to PATH
-    process.env.PATH = `${MOCK_BIN_PATH}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH || ''}`;
+    // Set test environment
+    process.env.NODE_ENV = 'test';
+    env.setTestMode(true);
+    
+    // Add both mock binaries and node_modules/.bin to PATH
+    process.env.PATH = `${MOCK_BIN_PATH}${process.platform === 'win32' ? ';' : ':'}${NODE_MODULES_BIN}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH || ''}`;
+    
+    // Clear any cached results
+    clearToolCache(MONOREPO_ROOT);
   });
 
   afterAll(() => {
-    // Restore original PATH
+    // Restore original environment
     process.env.PATH = originalPath;
+    process.env.NODE_ENV = originalNodeEnv;
+    env.setTestMode(false);
   });
 
   describe('scanWorkspaceTools', () => {

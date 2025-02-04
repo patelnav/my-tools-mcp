@@ -34,6 +34,7 @@ interface PackageJson {
 export interface PackageScripts {
   scripts: Set<string>;          // npm/pnpm/yarn run <script>
   dependencies: Set<string>;     // npm/pnpm/yarn exec <dependency>
+  binaries: Set<string>;         // Commands available in node_modules/.bin
   packageManager?: PackageManager; // Detected package manager
 }
 
@@ -134,6 +135,23 @@ async function findPackageJsonFiles(dir: string, patterns: string[] = ['**/packa
 }
 
 /**
+ * Checks if a package is a binary package (has a bin field)
+ * @param packageJsonPath Path to package.json
+ * @param packageName Name of the package to check
+ * @returns Promise<boolean>
+ */
+async function isPackageBinary(packageJsonPath: string, packageName: string): Promise<boolean> {
+  try {
+    const nodeModulesPath = join(dirname(packageJsonPath), 'node_modules', packageName, 'package.json');
+    const content = await readFile(nodeModulesPath, 'utf-8');
+    const pkg = JSON.parse(content);
+    return !!pkg.bin; // Package is a binary if it has a bin field
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Scans a single package.json file
  * @param packageJsonPath Path to package.json
  * @returns Promise<PackageScripts>
@@ -143,16 +161,27 @@ async function scanSinglePackageJson(packageJsonPath: string): Promise<PackageSc
     const content = await readFile(packageJsonPath, 'utf-8');
     const pkg: PackageJson = JSON.parse(content);
     
+    const allDeps = new Set([
+      ...Object.keys(pkg.dependencies || {}),
+      ...Object.keys(pkg.devDependencies || {})
+    ]);
+
+    // Check which dependencies are binaries
+    const binaries = new Set<string>();
+    for (const dep of allDeps) {
+      if (await isPackageBinary(packageJsonPath, dep)) {
+        binaries.add(dep);
+      }
+    }
+    
     return {
       scripts: new Set(Object.keys(pkg.scripts || {})),
-      dependencies: new Set([
-        ...Object.keys(pkg.dependencies || {}),
-        ...Object.keys(pkg.devDependencies || {})
-      ])
+      dependencies: allDeps,
+      binaries
     };
   } catch (error) {
     logger.error(`Error scanning package.json at ${packageJsonPath}:`, error);
-    return { scripts: new Set(), dependencies: new Set() };
+    return { scripts: new Set(), dependencies: new Set(), binaries: new Set() };
   }
 }
 
@@ -165,6 +194,7 @@ function mergePackageScripts(scripts: PackageScripts[]): PackageScripts {
   return {
     scripts: new Set(scripts.flatMap(s => [...s.scripts])),
     dependencies: new Set(scripts.flatMap(s => [...s.dependencies])),
+    binaries: new Set(scripts.flatMap(s => [...s.binaries])),
     packageManager: scripts[0]?.packageManager // Take the first package manager if available
   };
 }
@@ -213,7 +243,7 @@ export async function scanPackageJson(projectPath: string): Promise<PackageScrip
     return result;
   } catch (error) {
     logger.error('Error scanning workspace:', error);
-    return { scripts: new Set(), dependencies: new Set(), packageManager: 'npm' };
+    return { scripts: new Set(), dependencies: new Set(), binaries: new Set(), packageManager: 'npm' };
   }
 }
 
@@ -224,6 +254,14 @@ export async function scanPackageJson(projectPath: string): Promise<PackageScrip
  * @returns Promise<boolean>
  */
 export async function isPackageCommandAvailable(command: string, projectPath: string): Promise<boolean> {
+  // Handle npm:script format
+  if (command.includes(':')) {
+    const [packageManager, scriptName] = command.split(':');
+    if (!scriptName || !['npm', 'pnpm', 'yarn'].includes(packageManager)) return false;
+    const scripts = await scanPackageJson(projectPath);
+    return scripts.scripts.has(scriptName);
+  }
+
   const parts = command.split(' ');
   if (parts.length < 2) return false;
 
@@ -235,14 +273,23 @@ export async function isPackageCommandAvailable(command: string, projectPath: st
   switch (subcommand) {
     case 'run':
       if (!scriptName) return false;
+      // For documentation requests, only allow binaries
+      if (parts.some(arg => arg === '-h' || arg === '--help')) {
+        return scripts.binaries.has(scriptName);
+      }
+      // For regular execution, allow any script
       return scripts.scripts.has(scriptName);
 
     case 'exec':
       if (!scriptName) return false;
-      return scripts.dependencies.has(scriptName);
+      return scripts.binaries.has(scriptName);
 
     case 'start':
     case 'test':
+      // These are always scripts, not binaries
+      if (parts.some(arg => arg === '-h' || arg === '--help')) {
+        return false;
+      }
       return scripts.scripts.has(subcommand);
 
     default:

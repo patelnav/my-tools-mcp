@@ -35,6 +35,7 @@ export default defineConfig({
       '@panel': path.resolve(__dirname, './src/panel'),
       '@utils': path.resolve(__dirname, './src/utils'),
       '@test': path.resolve(__dirname, './src/__tests__'),
+      'vscode': path.resolve(__dirname, './src/__tests__/mocks/vscode.ts')
     },
   },
 }); 

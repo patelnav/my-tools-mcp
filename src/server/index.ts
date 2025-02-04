@@ -9,6 +9,7 @@ import { getServerConfig, ServerConfig, isValidVSCodeWebviewOrigin } from './con
 import fs from 'fs';
 import path from 'path';
 import { scanPackageJson, getAvailableCommands } from './controllers/docs/package-scanner';
+import { getAvailableTools } from './controllers/docs/path-scanner';
 import { env, shouldLog } from '@/env';
 
 interface RateLimitInfo {
@@ -155,7 +156,7 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
   // WebSocket connection handling
   wss.on('connection', (ws, request) => {
     const clientIp = request.socket.remoteAddress;
-    if (!shouldLog()) {
+    if (shouldLog()) {
       logCallback(`Client connected from ${clientIp}`, 'info');
     }
 
@@ -166,15 +167,15 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
         path: validWorkspacePath,
         serverPort: config.port
       });
-      if (!shouldLog()) {
+      if (shouldLog()) {
         logCallback(`Sending workspace path message: ${workspaceMessage}`, 'info');
       }
       ws.send(workspaceMessage);
-      if (!shouldLog()) {
+      if (shouldLog()) {
         logCallback('Workspace path message sent successfully', 'info');
       }
     } catch (error) {
-      if (!shouldLog()) {
+      if (shouldLog()) {
         logCallback(`Failed to send workspace path: ${error}`, 'error');
       }
     }
@@ -187,7 +188,7 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
 
     // Handle client errors
     ws.on('error', (error) => {
-      if (!shouldLog()) {
+      if (shouldLog()) {
         logCallback(`WebSocket client error: ${error.message}`, 'error');
       }
       ws.close();
@@ -198,7 +199,7 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
         // Check rate limit
         const limit = clientLimits.get(ws);
         if (!limit) {
-          if (!shouldLog()) {
+          if (shouldLog()) {
             logCallback('Rate limit info not found for client', 'error');
           }
           ws.close();
@@ -213,7 +214,7 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
 
         // Check if rate limit exceeded
         if (limit.count >= config.rateLimit.maxRequestsPerMinute) {
-          if (!shouldLog()) {
+          if (shouldLog()) {
             logCallback(`Rate limit exceeded for client ${clientIp}`, 'warn');
           }
           ws.send(JSON.stringify({
@@ -227,11 +228,35 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
         limit.count++;
 
         const data = JSON.parse(message.toString());
-        if (!shouldLog()) {
+        if (shouldLog()) {
           logCallback(`Received message from ${clientIp}: ${JSON.stringify(data)}`, 'info');
         }
 
-        if (data.type === 'GET_AVAILABLE_TOOLS') {
+        if (data.type === 'DISCOVER_TOOLS') {
+          try {
+            if (shouldLog()) {
+              logCallback(`Discovering tools in workspace: ${data.payload.projectPath}`, 'info');
+            }
+            const tools = await getAvailableTools(data.payload.projectPath);
+            if (shouldLog()) {
+              logCallback(`Found tools: ${JSON.stringify(tools)}`, 'info');
+            }
+            ws.send(JSON.stringify({
+              type: 'TOOLS_DISCOVERED',
+              payload: tools
+            }));
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            if (shouldLog()) {
+              logCallback(`Error discovering tools: ${errorMessage}`, 'error');
+              logCallback('Error details: ' + JSON.stringify(error), 'error');
+            }
+            ws.send(JSON.stringify({
+              type: 'ERROR',
+              payload: errorMessage
+            }));
+          }
+        } else if (data.type === 'GET_AVAILABLE_TOOLS') {
           try {
             logCallback('Getting available commands for workspace: ' + workspacePath, 'info');
             const commands = await getAvailableCommands(workspacePath);
@@ -242,24 +267,24 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
             }));
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            if (!shouldLog()) {
+            if (shouldLog()) {
               logCallback(`Error getting available tools: ${errorMessage}`, 'error');
               logCallback('Error details: ' + JSON.stringify(error), 'error');
             }
             ws.send(JSON.stringify({
               type: 'ERROR',
-              payload: `Failed to get available tools: ${errorMessage}`
+              payload: errorMessage
             }));
           }
         } else if (data.type === 'SELECT_TOOL') {
           const toolSelection: ToolSelection = data.payload;
-          if (!shouldLog()) {
+          if (shouldLog()) {
             logCallback(`Processing tool selection: ${JSON.stringify(toolSelection)}`, 'info');
           }
           
           // Validate the tool selection
           if (!toolSelection || !toolSelection.name || !toolSelection.projectPath) {
-            if (!shouldLog()) {
+            if (shouldLog()) {
               logCallback('Invalid tool selection: missing required fields', 'warn');
             }
             ws.send(JSON.stringify({
@@ -271,7 +296,7 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
 
           try {
             const documentation = await fetchToolDocumentation(toolSelection);
-            if (!shouldLog()) {
+            if (shouldLog()) {
               logCallback(`Documentation fetched successfully for ${toolSelection.name}`, 'info');
             }
             ws.send(JSON.stringify({
@@ -280,7 +305,7 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
             }));
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            if (!shouldLog()) {
+            if (shouldLog()) {
               logCallback(`Error fetching documentation: ${errorMessage}`, 'error');
             }
             ws.send(JSON.stringify({
@@ -289,7 +314,7 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
             }));
           }
         } else {
-          if (!shouldLog()) {
+          if (shouldLog()) {
             logCallback(`Unknown message type: ${data.type}`, 'warn');
           }
           ws.send(JSON.stringify({
@@ -298,8 +323,8 @@ export async function startMCPServer(workspacePath: string, isTest = false) {
           }));
         }
       } catch (error) {
-        if (!shouldLog()) {
-          logCallback('Error parsing message', 'error');
+        if (shouldLog()) {
+          logCallback(`Error handling message: ${error}`, 'error');
         }
         ws.send(JSON.stringify({
           type: 'ERROR',

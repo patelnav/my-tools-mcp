@@ -89,8 +89,10 @@ async function setupServer(): Promise<Server> {
   // Always start with a clean server
   await closeServer();
   
-  // Disable logging during tests
-  setLogCallback(() => {});
+  // Only disable logging if SHOULD_LOG is not set to true
+  if (process.env.SHOULD_LOG !== 'true') {
+    setLogCallback(() => {});
+  }
   
   const config = await initTestConfig();
   const testWorkspacePath = path.resolve(__dirname, '../..');
