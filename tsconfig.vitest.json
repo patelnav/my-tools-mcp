@@ -1,16 +1,21 @@
 {
     "extends": "./tsconfig.json",
     "compilerOptions": {
-        "module": "ESNext",
+        "module": "commonjs",
         "target": "ES2020",
-        "outDir": "out/__tests__",
+        "outDir": "out",
         "sourceMap": true,
         "strict": true,
         "rootDir": "src",
-        "types": ["vitest/globals", "node"],
-        "moduleResolution": "bundler"
+        "types": ["vitest/globals", "node"]
     },
     "include": [
-        "src/__tests__/**/*"
+        "src/__tests__/**/*",
+        "src/utils/**/*",
+        "src/server/**/*",
+        "src/types/**/*"
+    ],
+    "exclude": [
+        "src/__tests__/integration/**/*"
     ]
 } 

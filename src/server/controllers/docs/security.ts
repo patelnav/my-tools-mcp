@@ -9,6 +9,7 @@ import { SECURITY_CONFIG } from './tool-types';
 import { isPackageCommandAvailable } from './package-scanner';
 import { isBinaryAvailable, getToolInfo } from './path-scanner';
 import { logger } from './logger';
+import { getWorkspacePath } from '@/utils/workspace';
 
 // Security: Only allow documentation-related arguments
 export const ALLOWED_ARGS = new Set([
@@ -146,5 +147,5 @@ export interface ToolInfo {
 
 export async function isToolExecutable(tool: string | ToolInfo): Promise<boolean> {
   const toolName = typeof tool === 'string' ? tool : tool.name;
-  return validateToolName(toolName, process.cwd());
+  return validateToolName(toolName, getWorkspacePath());
 } 

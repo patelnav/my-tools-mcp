@@ -1,24 +1,7 @@
 import * as vscode from 'vscode';
 import { getNonce } from '@/utils/getNonce';
 import * as path from 'path';
-
-// Test environment detection
-const isTestEnvironment = process.env.VSCODE_TEST === '1';
-
-function getWorkspacePath(): string {
-    if (isTestEnvironment) {
-        // In test environment, use the test-monorepo path
-        return path.resolve(__dirname, '../../__tests__/fixtures/test-monorepo');
-    }
-    
-    // In normal environment, use workspace folders
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (workspaceFolders && workspaceFolders.length > 0) {
-        return workspaceFolders[0].uri.fsPath;
-    }
-    
-    return process.cwd();
-}
+import { getWorkspacePath } from '@/utils/workspace';
 
 export class MyToolsPanel {
   public static currentPanel: MyToolsPanel | undefined;
@@ -35,37 +18,50 @@ export class MyToolsPanel {
       const webviewContent = this._getHtmlForWebview(this._panel.webview, extensionUri);
       console.log('Initializing WebView with content length:', webviewContent.length);
       this._panel.webview.html = webviewContent;
+
+      // Handle messages from the webview
+      this._panel.webview.onDidReceiveMessage(
+        async message => {
+          console.log('Received message from WebView:', message);
+          switch (message.type) {
+            case 'WEBVIEW_READY':
+              console.log('WebView is ready');
+              // Confirm WebView readiness
+              this._panel.webview.postMessage({
+                type: 'WEBVIEW_READY_CONFIRMED'
+              });
+              break;
+            case 'GET_WORKSPACE_PATH':
+              const workspacePath = getWorkspacePath();
+              console.log('Sending workspace path:', workspacePath);
+              this._panel.webview.postMessage({
+                type: 'WORKSPACE_PATH',
+                path: workspacePath,
+                ...(this._serverPort && { serverPort: this._serverPort })
+              });
+              break;
+            case 'HELLO':
+              console.log('Received hello message, sending response');
+              this._panel.webview.postMessage({
+                type: 'HELLO_RESPONSE',
+                text: 'Hello from WebView!'
+              });
+              break;
+            case 'error':
+              vscode.window.showErrorMessage(message.value);
+              return;
+          }
+        },
+        null,
+        this._disposables
+      );
     } catch (error) {
       console.error('Error initializing WebView:', error);
       vscode.window.showErrorMessage('Failed to initialize MCP Tools panel');
     }
 
     // Listen for when the panel is disposed
-    // This happens when the user closes the panel or when the panel is closed programmatically
     this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
-
-    // Handle messages from the webview
-    this._panel.webview.onDidReceiveMessage(
-      message => {
-        console.log('Received message from WebView:', message);
-        switch (message.type) {
-          case 'GET_WORKSPACE_PATH':
-            const path = getWorkspacePath();
-            console.log('Sending workspace path:', path);
-            this._panel.webview.postMessage({
-              type: 'WORKSPACE_PATH',
-              path,
-              ...(this._serverPort && { serverPort: this._serverPort })
-            });
-            break;
-          case 'error':
-            vscode.window.showErrorMessage(message.value);
-            return;
-        }
-      },
-      null,
-      this._disposables
-    );
   }
 
   public static createOrShow(extensionUri: vscode.Uri, serverPort?: number) {
@@ -118,7 +114,7 @@ export class MyToolsPanel {
     const csp = `
       default-src 'none';
       style-src ${webview.cspSource} 'unsafe-inline';
-      script-src 'nonce-${nonce}' ${webview.cspSource};
+      script-src 'nonce-${nonce}' ${webview.cspSource} 'unsafe-eval';
       connect-src ws://localhost:* wss://localhost:* http://localhost:* https://localhost:*;
       img-src ${webview.cspSource} https:;
       font-src ${webview.cspSource};
@@ -142,32 +138,6 @@ export class MyToolsPanel {
       <body>
         <div id="root"></div>
         <script nonce="${nonce}" src="${scriptUri}"></script>
-        <script nonce="${nonce}">
-          console.log('WebView initialized');
-          
-          // Add WebSocket connection status to window
-          window.wsStatus = {
-            isConnecting: false,
-            retryCount: 0,
-            maxRetries: 5,
-            retryDelay: 1000,
-            lastError: null,
-            connected: false
-          };
-
-          window.onerror = function(message, source, lineno, colno, error) {
-            console.error('WebView error:', {message, source, lineno, colno, error});
-            if (window.wsStatus) {
-              window.wsStatus.lastError = error;
-            }
-            return false;
-          };
-
-          // Add connection status change handler
-          window.addEventListener('ws-status-change', function(e) {
-            console.log('WebSocket status changed:', e.detail);
-          });
-        </script>
       </body>
       </html>`;
   }

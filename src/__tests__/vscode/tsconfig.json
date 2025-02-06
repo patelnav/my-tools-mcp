@@ -1,0 +1,33 @@
+{
+    "compilerOptions": {
+        "module": "commonjs",
+        "target": "ES2020",
+        "outDir": "../../../out/vscode-tests",
+        "rootDir": "../../..",
+        "sourceMap": true,
+        "types": ["mocha", "node"],
+        "moduleResolution": "node",
+        "verbatimModuleSyntax": false,
+        "esModuleInterop": true,
+        "allowSyntheticDefaultImports": true,
+        "removeComments": true,
+        "noEmitOnError": false,
+        "noImplicitAny": false,
+        "strict": false,
+        "baseUrl": ".",
+        "paths": {
+            "*": ["*"]
+        }
+    },
+    "include": [
+        "**/*.cts",
+        "../../../src/utils/*.cts"
+    ],
+    "exclude": [
+        "../shared/**/*",
+        "../vitest/**/*",
+        "**/*.js",
+        "**/*.ts",
+        "**/*.mts"
+    ]
+} 

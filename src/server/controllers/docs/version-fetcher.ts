@@ -14,7 +14,7 @@ import type { ToolInfo } from './path-scanner';
  * @param projectPath Path to execute from
  * @returns Promise<string>
  */
-export async function getToolVersion(tool: ToolInfo, projectPath: string): Promise<string> {
+export async function getToolVersion(tool: ToolInfo, _projectPath: string): Promise<string> {
   try {
     const result = await executeTool(tool, ['--version'], {
       timeout: 2000,

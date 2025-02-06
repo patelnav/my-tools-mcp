@@ -16,26 +16,40 @@ export default defineConfig({
         isolate: true
       }
     },
-    // Timeouts
-    testTimeout: 5000,
-    hookTimeout: 5000,
-    teardownTimeout: 5000,
+    // Timeouts according to our rules (all values must be powers of 10 * 2)
+    testTimeout: 2000,    // 2s for individual tests
+    hookTimeout: 2000,    // 2s for hooks
+    teardownTimeout: 200, // 200ms for cleanup
     // Setup files
-    setupFiles: ['src/__tests__/setup.ts'],
+    setupFiles: ['src/__tests__/vitest/setup.ts'],
     // Environment
     environment: 'node',
-    // Include only server/backend tests
-    include: ['src/__tests__/**/*.test.ts'],
-    exclude: ['src/test/**/*', '**/node_modules/**', '.vscode-test/**']
+    // Include only vitest tests
+    include: [
+      'src/__tests__/vitest/**/*.test.ts',
+      'src/__tests__/vitest/docs/**/*.test.ts'
+    ],
+    exclude: [
+      'src/__tests__/vscode/**/*',
+      '**/node_modules/**',
+      '.vscode-test/**'
+    ],
+    // Use verbose reporter for detailed output
+    reporters: 'verbose'
   },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@server': path.resolve(__dirname, './src/server'),
-      '@panel': path.resolve(__dirname, './src/panel'),
-      '@utils': path.resolve(__dirname, './src/utils'),
       '@test': path.resolve(__dirname, './src/__tests__'),
+      '@utils': path.resolve(__dirname, './src/utils'),
+      '@server': path.resolve(__dirname, './src/server'),
+      '@types': path.resolve(__dirname, './src/types'),
+      '@shared': path.resolve(__dirname, './src/__tests__/shared'),
+      '@vitest': path.resolve(__dirname, './src/__tests__/vitest'),
+      '@vscode': path.resolve(__dirname, './src/__tests__/vscode'),
+      '@fixtures': path.resolve(__dirname, './src/__tests__/fixtures'),
+      '@panel': path.resolve(__dirname, './src/panel'),
       'vscode': path.resolve(__dirname, './src/__tests__/mocks/vscode.ts')
-    },
-  },
+    }
+  }
 }); 

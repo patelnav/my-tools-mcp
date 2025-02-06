@@ -1,0 +1,13 @@
+{
+  "imports": {
+    "@/*": "./src/*",
+    "@test/*": "./src/__tests__/*",
+    "@utils/*": "./src/utils/*",
+    "@server/*": "./src/server/*",
+    "@types/*": "./src/types/*",
+    "@shared/*": "./src/__tests__/shared/*",
+    "@vitest/*": "./src/__tests__/vitest/*",
+    "@vscode/*": "./src/__tests__/vscode/*",
+    "@fixtures/*": "./src/__tests__/fixtures/*"
+  }
+} 

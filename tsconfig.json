@@ -2,8 +2,9 @@
   "compilerOptions": {
     "target": "ES2020",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "module": "commonjs",
-    "rootDir": "src",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "rootDir": ".",
     "outDir": "out",
     "sourceMap": true,
     "strict": true,
@@ -11,15 +12,32 @@
     "skipLibCheck": true,
     "jsx": "react",
     "baseUrl": ".",
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "verbatimModuleSyntax": true,
     "paths": {
       "@/*": ["src/*"],
+      "@test/*": ["src/__tests__/*"],
+      "@utils/*": ["src/utils/*"],
       "@server/*": ["src/server/*"],
-      "@panel/*": ["src/panel/*"],
-      "@components/*": ["src/panel/components/*"],
-      "@controllers/*": ["src/server/controllers/*"],
-      "@test/*": ["src/__tests__/*"]
+      "@types/*": ["src/types/*"],
+      "@shared/*": ["src/__tests__/shared/*"],
+      "@vitest/*": ["src/__tests__/vitest/*"],
+      "@vscode/*": ["src/__tests__/vscode/*"],
+      "@fixtures/*": ["src/__tests__/fixtures/*"]
     }
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", ".vscode-test", "dist"]
+  "include": [
+    "src/**/*",
+    "*.ts",
+    "*.tsx",
+    "*.js",
+    "*.jsx"
+  ],
+  "exclude": ["node_modules", ".vscode-test", "dist", "out"]
 } 

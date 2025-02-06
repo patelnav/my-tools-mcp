@@ -5,7 +5,7 @@
  * validation, command execution, and caching of tool documentation.
  */
 
-import { DocumentationResponse, ToolSelection } from '@/types/types';
+import type { DocumentationResponse, ToolSelection } from '@/types/types';
 import { validateToolName } from './security';
 import { validateProjectPath, confirmDirectoryExists } from './path-validator';
 import { isToolExecutable } from './command-executor';
@@ -16,42 +16,9 @@ import { logger } from './logger';
 import { getToolInfo } from './path-scanner';
 import {
   isPackageManagerCommand,
-  getPackageManagerConfig,
-  requiresScriptName,
   getPackageManagerInstallInstructions
 } from './tool-types';
-
-function getInvalidToolNameError(toolName: string): string {
-  if (isPackageManagerCommand(toolName)) {
-    const parts = toolName.split(' ');
-    const pmConfig = getPackageManagerConfig(toolName);
-    
-    if (!pmConfig) {
-      return `Unsupported package manager: "${parts[0]}". Use npm, pnpm, or yarn.`;
-    }
-
-    if (parts.length === 1) {
-      return `Invalid package manager command. Use format: "${pmConfig.name} run <script>" or "${pmConfig.name} exec <command>"`;
-    }
-
-    const subcommand = parts[1].toLowerCase();
-    if (!pmConfig.allowedSubcommands.has(subcommand)) {
-      return `Invalid subcommand "${subcommand}" for ${pmConfig.name}. Valid subcommands: ${[...pmConfig.allowedSubcommands].join(', ')}`;
-    }
-
-    if (requiresScriptName(toolName) && parts.length === 2) {
-      return `Missing script/command name. Use format: "${pmConfig.name} ${subcommand} <name>"`;
-    }
-
-    return `Invalid package manager command: "${toolName}". Valid formats:\n` +
-           `- ${pmConfig.name} run <script>\n` +
-           `- ${pmConfig.name} exec <command>\n` +
-           `- ${pmConfig.name} start\n` +
-           `- ${pmConfig.name} test`;
-  }
-
-  return `Invalid tool name: "${toolName}". Tool names must only contain alphanumeric characters, hyphens, underscores, dots, or @ symbols.`;
-}
+import { ERROR_MESSAGES } from '@/constants';
 
 /**
  * Fetches documentation for a command-line tool
@@ -59,25 +26,17 @@ function getInvalidToolNameError(toolName: string): string {
  * @returns Promise<DocumentationResponse>
  */
 export async function fetchToolDocumentation(tool: ToolSelection): Promise<DocumentationResponse> {
-  // Security: Validate inputs
-  if (!await validateToolName(tool.name, tool.projectPath)) {
-    logger.warn(`Invalid tool name: ${tool.name}`);
-    return {
-      success: false,
-      error: getInvalidToolNameError(tool.name)
-    };
-  }
-  
+  // Security: Validate project path first
   if (!await validateProjectPath(tool.projectPath)) {
     logger.warn(`Invalid project path: ${tool.projectPath}`);
     return {
       success: false,
-      error: 'Project path is invalid or inaccessible'
+      error: ERROR_MESSAGES.INVALID_PROJECT_PATH
     };
   }
   
   try {
-    // Get tool info from our registry
+    // Get tool info from our registry first
     const toolInfo = await getToolInfo(tool.projectPath, tool.name);
     if (!toolInfo) {
       const baseCommand = tool.name.split(' ')[0];
@@ -89,7 +48,16 @@ export async function fetchToolDocumentation(tool: ToolSelection): Promise<Docum
         error: isPackageManager
           ? `Package manager "${baseCommand}" not found. ${getPackageManagerInstallInstructions(baseCommand)}\n` +
             'Make sure the package manager is available in your PATH after installation.'
-          : `Command "${tool.name}" not found. Please ensure it is installed and available in your PATH.`
+          : ERROR_MESSAGES.TOOL_NOT_FOUND(tool.name)
+      };
+    }
+
+    // Security: Now validate the tool name format
+    if (!await validateToolName(tool.name, tool.projectPath)) {
+      logger.warn(`Invalid tool name: ${tool.name}`);
+      return {
+        success: false,
+        error: ERROR_MESSAGES.INVALID_TOOL_NAME(tool.name)
       };
     }
 
@@ -99,7 +67,7 @@ export async function fetchToolDocumentation(tool: ToolSelection): Promise<Docum
       logger.warn(`Tool not executable: ${tool.name}`);
       return {
         success: false,
-        error: `Command "${tool.name}" exists but is not executable. Please check permissions.`
+        error: ERROR_MESSAGES.TOOL_NOT_EXECUTABLE(tool.name)
       };
     }
 
@@ -109,7 +77,7 @@ export async function fetchToolDocumentation(tool: ToolSelection): Promise<Docum
       logger.warn(`Directory not accessible: ${tool.projectPath}`);
       return {
         success: false,
-        error: 'Project path is invalid or inaccessible'
+        error: ERROR_MESSAGES.INVALID_PROJECT_PATH
       };
     }
 

@@ -11,9 +11,15 @@ class EnvironmentManager {
 
   constructor() {
     // Initialize environment from NODE_ENV, defaulting to 'development'
-    const nodeEnv = process.env.NODE_ENV?.toLowerCase() as Environment;
+    let nodeEnv: string | undefined;
+    
+    // Handle both Node.js and browser contexts
+    // In Node.js, we check if process exists first
+    // In browser, webpack's DefinePlugin will have replaced process.env.NODE_ENV with a literal
+    nodeEnv = (typeof process !== 'undefined' ? process.env?.NODE_ENV : undefined)?.toLowerCase();
+    
     this._environment = nodeEnv === 'test' || nodeEnv === 'production' 
-      ? nodeEnv 
+      ? nodeEnv as Environment 
       : 'development';
   }
 

@@ -1,52 +1,31 @@
-import React from 'react';
-import { useState, useEffect } from 'preact/hooks';
-import { ToolSelection, Command } from '@/types/types';
+/** @jsx h */
+import { h } from 'preact';
+import type { 
+  ToolSelection, 
+  ToolInfo
+} from '@/types/types';
 import { cn } from '@/utils/cn';
 
 interface ToolSelectorProps {
   onSelect: (tool: ToolSelection) => void;
   isConnected: boolean;
-  vscode: {
-    postMessage: (message: any) => void;
-    getState: () => any;
-  };
+  tools: ToolInfo[];
+  projectPath: string;
 }
 
-export function ToolSelector({ onSelect, isConnected, vscode }: ToolSelectorProps) {
-  const [projectPath, setProjectPath] = useState('');
-  const [commands, setCommands] = useState<Command[]>([]);
-
-  useEffect(() => {
-    console.log('Requesting workspace path and tools...');
-    vscode.postMessage({ type: 'GET_WORKSPACE_PATH' });
-    vscode.postMessage({ type: 'GET_AVAILABLE_TOOLS' });
-
-    const messageHandler = (event: { data: any }) => {
-      const message = event.data;
-      console.log('Received message type:', message.type);
-      console.log('Full message data:', message);
-      
-      if (message.type === 'WORKSPACE_PATH') {
-        console.log('Setting workspace path:', message.path);
-        setProjectPath(message.path);
-      } else if (message.type === 'AVAILABLE_TOOLS') {
-        console.log('Available tools payload:', message.payload);
-        console.log('Available tools commands:', message.commands);
-        const toolsList = message.commands || message.payload || [];
-        console.log('Setting commands:', toolsList);
-        setCommands(toolsList);
-      }
-    };
-
-    window.addEventListener('message', messageHandler);
-    return () => window.removeEventListener('message', messageHandler);
-  }, [vscode]);
-
-  const handleCommandSelect = (command: Command) => {
-    onSelect({
-      name: command.command,
+export function ToolSelector({ onSelect, isConnected, tools, projectPath }: ToolSelectorProps) {
+  const handleCommandSelect = (tool: ToolInfo) => {
+    console.log('[ToolSelector] Tool clicked:', tool);
+    if (!tool?.name || !projectPath) {
+      console.error('[ToolSelector] Invalid tool selection:', { tool, projectPath });
+      return;
+    }
+    const selection = {
+      name: tool.name,
       projectPath: projectPath || window.location.pathname
-    });
+    };
+    console.log('[ToolSelector] Sending tool selection:', selection);
+    onSelect(selection);
   };
 
   return (
@@ -57,37 +36,36 @@ export function ToolSelector({ onSelect, isConnected, vscode }: ToolSelectorProp
         </p>
       )}
 
-      <div className="space-y-2">
-        <h3 className="font-medium text-gray-700 dark:text-gray-300">
-          All Tools ({commands.length})
+      <div>
+        <h3 className="font-medium text-gray-700 dark:text-gray-300 mb-4">
+          Available Tools ({tools.length})
         </h3>
+
         <div className="space-y-1">
-          {commands.map((command, index) => (
+          {tools.map((tool, index) => (
             <button
-              key={`${command.command}-${index}`}
-              onClick={() => handleCommandSelect(command)}
+              key={`${tool.name}-${index}`}
+              onClick={() => handleCommandSelect(tool)}
               className={cn(
-                "w-full text-left px-3 py-2 rounded",
-                "hover:bg-gray-100 dark:hover:bg-gray-700",
-                "focus:outline-none focus:ring-2 focus:ring-blue-500",
-                "disabled:opacity-50",
-                "transition-colors duration-150"
+                "w-full text-left p-3",
+                "bg-white dark:bg-gray-800",
+                "hover:bg-gray-50 dark:hover:bg-gray-700",
+                "border border-gray-200 dark:border-gray-700",
+                "rounded-md",
+                "disabled:opacity-50 disabled:cursor-not-allowed"
               )}
               disabled={!isConnected}
             >
-              <div className="font-mono text-sm text-gray-900 dark:text-gray-100">
-                {command.command}
+              <div className="flex flex-col">
+                <span className="font-mono text-sm text-gray-900 dark:text-gray-100">
+                  {tool.name}
+                </span>
+                {tool.type && (
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    {tool.type}
+                  </span>
+                )}
               </div>
-              {command.description && (
-                <div className="text-sm text-gray-500 dark:text-gray-400">
-                  {command.description}
-                </div>
-              )}
-              {command.package && (
-                <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                  {command.package}
-                </div>
-              )}
             </button>
           ))}
         </div>

@@ -6,9 +6,10 @@
  */
 
 import { readdir, readFile } from 'fs/promises';
-import { join, relative, dirname } from 'path';
+import { join, dirname } from 'path';
 import { logger } from '@server/controllers/docs/logger';
 import { env } from '@/env';
+import { getWorkspacePath } from '@/utils/workspace';
 
 // Cache of scanned tools per workspace
 const toolCache = new Map<string, { tools: Map<string, ToolInfo>, timestamp: number }>();
@@ -29,7 +30,7 @@ interface PackageJson {
   name?: string;
   scripts?: Record<string, string>;
   bin?: Record<string, string> | string;
-  workspaces?: string[];
+  workspaces?: string[] | { packages: string[] };
 }
 
 /**
@@ -38,9 +39,13 @@ interface PackageJson {
  * @returns boolean
  */
 function isExecutable(filename: string): boolean {
+  logger.debug('Checking if file is executable:', { filename, platform: process.platform });
   if (process.platform === 'win32') {
-    return env.executableExtensions.some(ext => filename.toUpperCase().endsWith(ext));
+    const result = env.executableExtensions.some(ext => filename.toUpperCase().endsWith(ext));
+    logger.debug('Windows executable check:', { filename, result, extensions: env.executableExtensions });
+    return result;
   }
+  logger.debug('Unix executable check - assuming true');
   return true; // On Unix, we trust the file permissions (handled by readdir)
 }
 
@@ -48,21 +53,45 @@ function isExecutable(filename: string): boolean {
  * Scans PATH for globally available tools
  */
 async function scanGlobalBinaries(
-  tools: Map<string, ToolInfo>
+  tools: Map<string, ToolInfo>,
+  workspacePath: string
 ): Promise<void> {
-  // Get PATH directories
-  const pathDirs = (process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':');
-  
   // Common global tools to look for
-  const commonTools = ['git', 'node', 'npm', 'yarn', 'pnpm'];
+  const globalTools = ['git', 'node', 'npm', 'yarn', 'pnpm'];
   
-  for (const tool of commonTools) {
+  // First check if any of these tools exist in the workspace bin directory
+  const binPath = join(workspacePath, 'bin');
+  try {
+    const files = await readdir(binPath, { withFileTypes: true });
+    for (const file of files) {
+      if ((file.isFile() || file.isSymbolicLink()) && isExecutable(file.name)) {
+        const name = process.platform === 'win32'
+          ? file.name.replace(/\.[^/.]+$/, '')
+          : file.name;
+        
+        if (globalTools.includes(name)) {
+          tools.set(name, {
+            name,
+            location: join(binPath, file.name),
+            workingDirectory: workspacePath,
+            type: 'workspace-bin',
+            context: {}
+          });
+        }
+      }
+    }
+  } catch (error) {
+    logger.debug('Error scanning workspace bin for global tools:', error);
+  }
+  
+  // Then add any remaining tools as global
+  for (const tool of globalTools) {
     // Don't override tools already found in workspace
     if (!tools.has(tool)) {
       tools.set(tool, {
         name: tool,
         type: 'global-bin',
-        workingDirectory: process.cwd(),
+        workingDirectory: getWorkspacePath(),
         context: {}
       });
     }
@@ -108,7 +137,7 @@ export async function scanWorkspaceTools(
 
     // Finally scan for global tools
     logger.debug('Scanning for global tools...');
-    await scanGlobalBinaries(tools);
+    await scanGlobalBinaries(tools, workspacePath);
     logger.debug('After global tools scan:', { tools: [...tools.entries()] });
 
     // Update cache
@@ -145,7 +174,8 @@ async function scanPackageJson(
           workingDirectory: workspacePath,
           type: 'npm-script',
           context: {
-            scriptSource: pkgPath
+            scriptSource: pkgPath,
+            script
           }
         });
       }
@@ -153,7 +183,8 @@ async function scanPackageJson(
 
     // Scan workspaces if present
     if (pkg.workspaces) {
-      for (const pattern of pkg.workspaces) {
+      const patterns = Array.isArray(pkg.workspaces) ? pkg.workspaces : pkg.workspaces.packages;
+      for (const pattern of patterns) {
         // Note: This is a simplified glob pattern handling
         // In reality, you'd want to use a proper glob matcher
         const workspacePkgPath = join(workspacePath, pattern.replace('/*', ''), 'package.json');
@@ -212,7 +243,11 @@ async function scanWorkspaceBin(
   logger.debug('Scanning workspace bin directory:', { binPath, workspacePath });
   try {
     const files = await readdir(binPath, { withFileTypes: true });
-    logger.debug('Found files in bin directory:', files.map(f => ({ name: f.name, type: f.isFile() ? 'file' : f.isSymbolicLink() ? 'symlink' : 'other' })));
+    logger.debug('Found files in bin directory:', files.map(f => ({ 
+      name: f.name, 
+      type: f.isFile() ? 'file' : f.isSymbolicLink() ? 'symlink' : 'other',
+      isExecutable: isExecutable(f.name)
+    })));
     
     for (const file of files) {
       // Handle both regular files and symlinks
@@ -293,19 +328,17 @@ export function clearToolCache(workspacePath: string): void {
 }
 
 /**
- * Checks if a binary is available in the workspace
- * @param binaryName Name of the binary to check
- * @param projectPath Path to the project root (defaults to process.cwd())
+ * Check if a binary is available in the workspace
+ * @param binaryName Name of binary to check
+ * @param projectPath Optional project path, defaults to workspace path
  * @returns Promise<boolean>
  */
-async function isBinaryAvailable(binaryName: string, projectPath: string = process.cwd()): Promise<boolean> {
+export async function isBinaryAvailable(binaryName: string, projectPath?: string): Promise<boolean> {
   try {
-    const tools = await scanWorkspaceTools(projectPath);
+    const tools = await scanWorkspaceTools(projectPath || getWorkspacePath());
     return tools.has(binaryName);
   } catch (error) {
     logger.warn(`Error checking binary availability: ${error}`);
     return false;
   }
-}
-
-export { isBinaryAvailable }; 
+} 

@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { join } from 'path';
-import { validateToolName, validateArgs } from '../../server/controllers/docs/security';
-import { isPackageCommandAvailable } from '../../server/controllers/docs/package-scanner';
+import * as path from 'node:path';
+import { validateToolName, validateArgs } from '@server/controllers/docs/security';
+import { isPackageCommandAvailable } from '@server/controllers/docs/package-scanner';
 import { env } from '@/env';
+import { getTestMonorepoPath } from '@shared/workspace';
 
-const MONOREPO_ROOT = join(__dirname, '../fixtures/test-monorepo');
-const MOCK_BIN_PATH = join(MONOREPO_ROOT, 'bin');
-const NODE_MODULES_BIN = join(MONOREPO_ROOT, 'node_modules', '.bin');
+const MONOREPO_ROOT = getTestMonorepoPath();
+const MOCK_BIN_PATH = path.join(MONOREPO_ROOT, 'bin');
+const NODE_MODULES_BIN = path.join(MONOREPO_ROOT, 'node_modules', '.bin');
 const MOCK_PROJECT_PATH = MONOREPO_ROOT;
 
 describe('Security Module', () => {

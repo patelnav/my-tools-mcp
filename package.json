@@ -2,6 +2,7 @@
   "name": "my-tools-mcp",
   "displayName": "MCP Tools Documentation",
   "version": "1.0.0",
+  "type": "module",
   "publisher": "undefined_publisher",
   "description": "MCP-connected tool documentation server with integrated UI",
   "engines": {
@@ -10,10 +11,7 @@
   "categories": [
     "Other"
   ],
-  "main": "./dist/extension.js",
-  "activationEvents": [
-    "onCommand:mcpTools.openPanel"
-  ],
+  "main": "./dist/extension.cjs",
   "contributes": {
     "commands": [
       {
@@ -27,15 +25,13 @@
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
-    "lint": "eslint src --ext ts,tsx",
-    "test": "node ./out/test/runTest.js",
-    "test:vitest": "vitest run",
-    "test:all": "pnpm compile && pnpm test:vitest && pnpm test",
-    "pretest": "tsc -p ./tsconfig.test.json",
-    "pretest:vitest": "tsc -p ./tsconfig.vitest.json",
-    "compile-tests": "tsc -p ./",
-    "dev": "webpack --watch",
-    "build": "webpack --mode production",
+    "lint": "eslint src --ext ts,tsx,cts",
+    "test:vscode": "VSCODE_TEST=true NODE_ENV=test pnpm clean && pnpm compile && tsc -p ./src/__tests__/vscode/tsconfig.json && node ./out/vscode-tests/src/__tests__/vscode/runTest.cjs",
+    "test:vitest": "NODE_ENV=test vitest run --config ./vitest.config.ts",
+    "test:vitest:watch": "NODE_ENV=test vitest --config ./vitest.config.ts",
+    "test:vitest:ui": "NODE_ENV=test vitest --ui --config ./vitest.config.ts",
+    "test": "pnpm test:vitest",
+    "test:all": "pnpm test:vitest && pnpm test:vscode",
     "clean": "rimraf dist out"
   },
   "dependencies": {
@@ -74,6 +70,8 @@
     "bufferutil": "^4.0.9",
     "css-loader": "^6.11.0",
     "eslint": "^8.57.1",
+    "eslint-import-resolver-typescript": "^3.7.0",
+    "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "eslint-plugin-react-refresh": "^0.4.5",
     "glob": "^11.0.1",
@@ -85,6 +83,9 @@
     "style-loader": "^3.3.4",
     "tailwindcss": "^3.4.17",
     "ts-loader": "^9.5.2",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "utf-8-validate": "^6.0.5",
     "vitest": "^1.6.0",

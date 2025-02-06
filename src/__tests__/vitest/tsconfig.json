@@ -1,0 +1,39 @@
+{
+    "extends": "../../../tsconfig.json",
+    "compilerOptions": {
+        "module": "ESNext",
+        "target": "ES2020",
+        "outDir": "../../../out",
+        "sourceMap": true,
+        "strict": true,
+        "rootDir": "../../",
+        "types": ["vitest/globals", "node"],
+        "baseUrl": "../../..",
+        "paths": {
+            "@/*": ["src/*"],
+            "@test/*": ["src/__tests__/*"],
+            "@utils/*": ["src/utils/*"],
+            "@server/*": ["src/server/*"],
+            "@types/*": ["src/types/*"],
+            "@shared/*": ["src/__tests__/shared/*"],
+            "@vitest/*": ["src/__tests__/vitest/*"],
+            "@vscode/*": ["src/__tests__/vscode/*"],
+            "@fixtures/*": ["src/__tests__/fixtures/*"]
+        }
+    },
+    "include": [
+        "./docs/**/*.ts",
+        "./docs/**/*.tsx",
+        "./suite/**/*.ts",
+        "./suite/**/*.tsx",
+        "./*.ts",
+        "./*.tsx",
+        "../shared/**/*.ts",
+        "../shared/**/*.tsx"
+    ],
+    "exclude": [
+        "../vscode/**/*",
+        "**/node_modules/**",
+        "**/.vscode-test/**"
+    ]
+} 

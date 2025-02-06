@@ -1,0 +1,6 @@
+{
+    "type": "commonjs",
+    "name": "vscode-tests",
+    "private": true,
+    "version": "1.0.0"
+} 

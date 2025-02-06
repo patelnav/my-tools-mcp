@@ -4,13 +4,15 @@
  * Handles secure execution of tool commands for version and help text retrieval.
  */
 
+import type { ToolInfo } from './path-scanner';
 import { spawn } from 'child_process';
-import { logger } from '@server/controllers/docs/logger';
-import { ToolInfo } from './path-scanner';
-import { join } from 'path';
+import { logger } from './logger';
+import { existsSync } from 'fs';
+import { getWorkspacePath } from '@/utils/workspace';
 
 interface CommandOptions {
-  cwd: string;
+  cwd?: string;
+  currentDir?: string;
   timeout?: number;
   maxOutputSize?: number;
 }
@@ -39,7 +41,7 @@ export async function executeTool(
   let command: string;
   let finalArgs: string[] = [...args];
   const finalOptions: CommandOptions = {
-    cwd: tool.workingDirectory || process.cwd(), // Use process.cwd() as fallback
+    cwd: tool.workingDirectory || getWorkspacePath(),
     timeout: options.timeout || 5000,
     maxOutputSize: options.maxOutputSize || 50000
   };
@@ -48,7 +50,7 @@ export async function executeTool(
     tool,
     args,
     options: finalOptions,
-    currentDir: process.cwd()
+    currentDir: getWorkspacePath()
   });
 
   switch (tool.type) {
@@ -64,7 +66,7 @@ export async function executeTool(
         command,
         location: tool.location,
         name: tool.name,
-        exists: require('fs').existsSync(command)
+        exists: existsSync(command)
       });
       break;
     
@@ -82,11 +84,14 @@ export async function executeTool(
  * @param options Execution options
  * @returns Promise<CommandResult>
  */
-async function executeCommand(
+export async function executeCommand(
   command: string,
   args: string[],
   options: CommandOptions
 ): Promise<CommandResult> {
+  const workspacePath = getWorkspacePath();
+  const cwd = options.cwd || workspacePath;
+  const currentDir = options.currentDir || workspacePath;
   const timeout = options.timeout || 5000;
   const maxOutputSize = options.maxOutputSize || 50000;
 
@@ -95,15 +100,15 @@ async function executeCommand(
       logger.debug('Executing command:', {
         command,
         args,
-        cwd: options.cwd,
+        cwd,
         timeout,
         maxOutputSize,
-        currentDir: process.cwd(),
-        commandExists: require('fs').existsSync(command)
+        currentDir,
+        commandExists: existsSync(command)
       });
       
       const child = spawn(command, args, {
-        cwd: options.cwd,
+        cwd,
         shell: false, // Security: Disable shell execution
         timeout // Security: Timeout after specified duration
       });
@@ -131,7 +136,7 @@ async function executeCommand(
           code: err.code,
           command,
           args,
-          cwd: options.cwd
+          cwd
         });
         if (err.code === 'ENOENT') {
           reject(new Error(`Command not found: ${command}`));
@@ -147,7 +152,7 @@ async function executeCommand(
           error,
           command,
           args,
-          cwd: options.cwd
+          cwd
         });
         resolve({ output: output || error, code: code || 0 });
       });
@@ -156,14 +161,12 @@ async function executeCommand(
         error,
         command,
         args,
-        cwd: options.cwd
+        cwd
       });
       reject(error);
     }
   });
 }
-
-export { executeCommand };
 
 /**
  * Checks if a tool is available and executable

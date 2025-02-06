@@ -4,7 +4,7 @@
  * Provides consistent logging functionality with test mode awareness.
  */
 
-import { env, shouldLog } from '@/env';
+import { shouldLog } from '@/env';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 

@@ -1,125 +1,102 @@
-import React, { useEffect, useState } from 'react';
-import { DocumentationResponse, ToolSelection, Command } from '@/types/types';
+/** @jsx h */
+/** @jsxFrag Fragment */
+import { h, Fragment } from 'preact';
+import { useEffect, useState } from 'preact/hooks';
+import type { 
+  DocumentationResponse, 
+  ToolSelection, 
+  Command,
+  VSCodeMessage,
+  WebSocketMessage,
+  WorkspacePathMessage,
+  DiscoverToolsMessage,
+  ToolsDiscoveredMessage,
+  DocumentationUpdatedMessage,
+  ErrorMessage,
+  WebSocketStatusMessage,
+  HelloResponseMessage,
+  GetWorkspacePathMessage
+} from '@/types/types';
 import { cn } from '@/utils/cn';
 import { ToolSelector } from './components/ToolSelector';
+import { LoadingState } from './components/LoadingState';
+import { useWebSocket } from './hooks/useWebSocket';
+import './index.css';
 
-declare const acquireVsCodeApi: () => {
-  postMessage: (message: any) => void;
-  getState: () => any;
-};
+interface AppProps {
+  vscode: {
+    postMessage: (message: VSCodeMessage) => void;
+    getState: () => any;
+  };
+}
 
-// Acquire VS Code API once at the module level
-const vscode = acquireVsCodeApi();
+export function App({ vscode }: AppProps) {
+  const [projectPath, setProjectPath] = useState('');
+  const [serverPort, setServerPort] = useState<number>();
+  const [isWebViewReady, setIsWebViewReady] = useState(false);
+  
+  const { 
+    ws, 
+    isConnected, 
+    error, 
+    availableTools,
+    documentation 
+  } = useWebSocket({
+    serverPort,
+    workspacePath: projectPath,
+    vscode
+  });
 
-export function App() {
-  const [ws, setWs] = useState<WebSocket | null>(null);
-  const [documentation, setDocumentation] = useState<DocumentationResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [availableTools, setAvailableTools] = useState<Command[]>([]);
-
+  // Initialize WebView
   useEffect(() => {
-    console.log('Requesting workspace path...');
+    console.log('[App] Initializing WebView');
+    vscode.postMessage({ type: 'WEBVIEW_READY' });
+  }, [vscode]);
+
+  // Request workspace path after WebView is ready
+  useEffect(() => {
+    if (!isWebViewReady) return;
+    console.log('[App] Requesting workspace path');
     vscode.postMessage({ type: 'GET_WORKSPACE_PATH' });
+  }, [isWebViewReady, vscode]);
 
-    const messageHandler = (event: MessageEvent) => {
+  // Handle VS Code messages
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent<VSCodeMessage>) => {
       const message = event.data;
-      console.log('Received message:', message);
-      
-      if (message.type === 'WORKSPACE_PATH') {
-        console.log('Setting project path to:', message.path);
-        // Now that we have the workspace path and server port, try to connect
-        const socket = new WebSocket(`ws://localhost:${message.serverPort}`);
+      console.log('[App] Received VS Code message:', message);
 
-        socket.onopen = () => {
-          console.log('Connected to MCP server');
-          setWs(socket);
-          setIsConnected(true);
-          setError(null);
-          
-          // Send connection status to extension
-          vscode.postMessage({
-            type: 'WEBSOCKET_STATUS',
-            status: 'connected'
-          });
-          
-          // Request available tools once connected
-          socket.send(JSON.stringify({
-            type: 'GET_AVAILABLE_TOOLS'
-          }));
-        };
-
-        socket.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            console.log('Received WebSocket message:', message);
-            switch (message.type) {
-              case 'DOCUMENTATION_UPDATED':
-                setDocumentation(message.payload);
-                setError(null);
-                break;
-              case 'AVAILABLE_TOOLS':
-                setAvailableTools(message.commands || message.payload);
-                setError(null);
-                // Forward the tools to the extension
-                vscode.postMessage({
-                  type: 'AVAILABLE_TOOLS',
-                  commands: message.commands || message.payload
-                });
-                break;
-              case 'ERROR':
-                setError(message.payload);
-                break;
-            }
-          } catch (err) {
-            console.error('Failed to parse server message:', err);
-            setError('Failed to parse server message');
-          }
-        };
-
-        socket.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          setError('WebSocket connection error');
-          setIsConnected(false);
-          vscode.postMessage({
-            type: 'WEBSOCKET_STATUS',
-            status: 'error',
-            error: error.toString()
-          });
-          vscode.postMessage({ type: 'error', value: 'Failed to connect to MCP server' });
-        };
-
-        socket.onclose = () => {
-          console.log('WebSocket connection closed');
-          setWs(null);
-          setIsConnected(false);
-          setError('Connection closed');
-          vscode.postMessage({
-            type: 'WEBSOCKET_STATUS',
-            status: 'closed'
-          });
-        };
-
-        return () => {
-          socket.close();
-        };
+      switch (message.type) {
+        case 'WEBVIEW_READY_CONFIRMED':
+          setIsWebViewReady(true);
+          break;
+        case 'WORKSPACE_PATH':
+          setProjectPath(message.path);
+          setServerPort(message.serverPort);
+          break;
+        case 'HELLO':
+          vscode.postMessage({ type: 'HELLO_RESPONSE', text: 'Hello from WebView!' });
+          break;
       }
     };
 
-    window.addEventListener('message', messageHandler);
-    return () => {
-      window.removeEventListener('message', messageHandler);
-    };
-  }, []);
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [vscode]);
 
   const handleToolSelect = (tool: ToolSelection) => {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'SELECT_TOOL',
-        payload: tool
-      }));
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'SELECT_TOOL', payload: tool }));
     }
   };
+
+  if (!isWebViewReady || !serverPort) {
+    return <LoadingState />;
+  }
+
+  if (error) {
+    return <LoadingState error={error} />;
+  }
 
   return (
     <div className="p-4 max-w-4xl mx-auto">
@@ -132,11 +109,7 @@ export function App() {
             : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300"
         )}>
           {isConnected ? (
-            <>
-              Connected to MCP server
-              {availableTools.length > 0 && ` (${availableTools.length} tools available)`}
-              {JSON.stringify(availableTools, null, 2)}
-            </>
+            <>Connected to MCP server {availableTools.length > 0 && `(${availableTools.length} tools available)`}</>
           ) : "Disconnected"}
         </div>
       </header>
@@ -147,15 +120,12 @@ export function App() {
           <ToolSelector 
             onSelect={handleToolSelect} 
             isConnected={isConnected} 
-            vscode={vscode} 
+            tools={availableTools}
+            projectPath={projectPath}
           />
         </section>
 
-        {error ? (
-          <section className="p-4 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded">
-            {error}
-          </section>
-        ) : documentation?.success && documentation.data ? (
+        {documentation?.success && documentation.data && (
           <section className="space-y-4">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
@@ -172,7 +142,7 @@ export function App() {
               Last updated: {new Date(documentation.data.lastUpdated).toLocaleString()}
             </p>
           </section>
-        ) : null}
+        )}
       </div>
     </div>
   );

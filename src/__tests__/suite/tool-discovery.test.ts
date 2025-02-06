@@ -1,155 +1,98 @@
-import * as vscode from 'vscode';
-import * as assert from 'assert';
+import { describe, it, expect } from 'vitest';
+import { getTestMonorepoPath } from '@test/shared/workspace';
+import { scanWorkspaceTools } from '@utils/workspace';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as os from 'os';
+import { logHeader, logStep, logSuccess } from '@utils/logging';
 
-function log(message: string) {
-    console.log(`[Tool Discovery Test] ${message}`);
-}
+describe('Tool Discovery', () => {
+  it('should discover tools in workspace bin directory', async () => {
+    logHeader('Testing workspace bin directory tool discovery');
+    const tools = await scanWorkspaceTools(getTestMonorepoPath());
+    
+    logStep('Verifying workspace bin tools');
+    const binTools = Array.from(tools.values()).filter(t => t.type === 'workspace-bin');
+    expect(binTools.length).toBeGreaterThan(0);
+    expect(binTools[0].location).toContain('bin/');
+    logSuccess('Found workspace bin tools');
+  });
 
-suite('Tool Discovery', function() {
-    // Use function() instead of arrow function to preserve this context
-    this?.timeout(15000); // Optional chaining to handle possible undefined
+  it('should discover tools in node_modules/.bin', async () => {
+    logHeader('Testing node_modules/.bin tool discovery');
+    const tools = await scanWorkspaceTools(getTestMonorepoPath());
+    
+    logStep('Checking all discovered tools');
+    const allTools = Array.from(tools.entries()).map(([name, tool]) => ({
+      name,
+      type: tool.type,
+      location: tool.location
+    }));
+    console.log('All discovered tools:', allTools);
+    
+    logStep('Verifying package binaries');
+    const pkgBins = Array.from(tools.values()).filter(t => t.type === 'package-bin');
+    console.log('Package binaries:', pkgBins);
+    
+    expect(pkgBins.length).toBeGreaterThan(0);
+    expect(pkgBins.some(t => t.name === 'vite')).toBe(true);
+    expect(pkgBins.some(t => t.name === 'vitest')).toBe(true);
+    logSuccess('Found expected package binaries');
+  });
 
-    test('should activate the extension', async function() {
-        log('Starting extension activation test');
-        const ext = vscode.extensions.getExtension('undefined_publisher.my-tools-mcp');
-        if (!ext) {
-            log('Extension not found');
-            throw new Error('Extension not found');
-        }
-        log('Extension found, activating...');
-        const exports = await ext.activate();
-        assert.ok(ext.isActive, 'Extension should be active');
-        assert.ok(exports, 'Extension should return exports object');
-        assert.ok(typeof exports.getWebviewPanel === 'function', 'Exports should have getWebviewPanel function');
-        log('Extension activated successfully');
-    });
+  it('should discover npm scripts from package.json', async () => {
+    logHeader('Testing package.json script discovery');
+    const tools = await scanWorkspaceTools(getTestMonorepoPath());
+    
+    logStep('Verifying npm scripts');
+    const npmScripts = Array.from(tools.values()).filter(t => t.type === 'npm-script');
+    expect(npmScripts.length).toBeGreaterThan(0);
+    expect(npmScripts.some(t => t.name === 'npm:build')).toBe(true);
+    expect(npmScripts.some(t => t.name === 'npm:test')).toBe(true);
+    expect(npmScripts.some(t => t.name === 'npm:start')).toBe(true);
+    logSuccess('Found expected npm scripts');
+  });
 
-    test('should open MCP Tools panel and discover tools', async function() {
-        log('Starting tool discovery test');
-        
-        // Get extension instance
-        const ext = vscode.extensions.getExtension('undefined_publisher.my-tools-mcp');
-        if (!ext) {
-            throw new Error('Extension not found');
-        }
-        if (!ext.isActive) {
-            log('Extension not active, activating...');
-            await ext.activate();
-        }
-        
-        // Verify exports are available
-        if (!ext.exports) {
-            log('Extension exports is undefined');
-            throw new Error('Extension exports is undefined');
-        }
-        log(`Extension exports keys: ${Object.keys(ext.exports)}`);
-        
-        // Create a promise that will resolve when tools are discovered
-        const toolDiscoveryPromise = new Promise<void>((resolve, reject) => {
-            log('Setting up tool discovery promise');
-            const timeout = setTimeout(() => {
-                log('Tool discovery timed out after 10000ms');
-                reject(new Error('Tool discovery timed out'));
-            }, 10000);
+  it('should handle invalid workspace path', async () => {
+    logHeader('Testing invalid workspace path handling');
+    const invalidPath = path.join(os.tmpdir(), 'nonexistent-workspace');
+    await expect(async () => {
+      await scanWorkspaceTools(invalidPath);
+    }).rejects.toThrow('Invalid workspace path');
+    logSuccess('Invalid path handled correctly');
+  });
 
-            // Track the WebSocket connection status
-            let isWebSocketConnected = false;
-            let panel: vscode.WebviewPanel | undefined;
+  it('should handle empty workspace', async () => {
+    logHeader('Testing empty workspace handling');
+    const emptyDir = await fs.mkdtemp(path.join(os.tmpdir(), 'empty-workspace-'));
+    try {
+      logStep('Scanning empty workspace');
+      const tools = await scanWorkspaceTools(emptyDir);
+      
+      logStep('Verifying global tools');
+      const globalTools = Array.from(tools.values()).filter(t => t.type === 'global-bin');
+      expect(globalTools.length).toBe(5);
+      expect(globalTools.some(t => t.name === 'git')).toBe(true);
+      expect(globalTools.some(t => t.name === 'node')).toBe(true);
+      expect(globalTools.some(t => t.name === 'npm')).toBe(true);
+      expect(globalTools.some(t => t.name === 'yarn')).toBe(true);
+      expect(globalTools.some(t => t.name === 'pnpm')).toBe(true);
+      logSuccess('Found expected global tools');
+    } finally {
+      await fs.rm(emptyDir, { recursive: true });
+    }
+  });
 
-            // Set up message listener before opening panel
-            const messageListener = (message: any) => {
-                log(`Received message from WebView: ${JSON.stringify(message)}`);
-                
-                // First, the WebView will request the workspace path
-                if (message.type === 'GET_WORKSPACE_PATH') {
-                    log('Received GET_WORKSPACE_PATH request');
-                    // After sending workspace path, server should start sharing
-                    panel?.webview.postMessage({
-                        type: 'WORKSPACE_PATH',
-                        path: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd()
-                    });
-                }
-
-                // Track WebSocket connection status
-                if (message.type === 'WEBSOCKET_STATUS') {
-                    log(`WebSocket status: ${message.status}`);
-                    if (message.status === 'connected') {
-                        isWebSocketConnected = true;
-                        log('WebSocket connected successfully');
-                    } else if (message.status === 'error') {
-                        log(`WebSocket error: ${message.error}`);
-                        clearTimeout(timeout);
-                        cleanup();
-                        reject(new Error(`WebSocket connection failed: ${message.error}`));
-                    }
-                }
-                
-                // After WebSocket connection is established, tools will be discovered
-                if (message.type === 'AVAILABLE_TOOLS') {
-                    if (!isWebSocketConnected) {
-                        log('Received tools before WebSocket connection was established');
-                        return;
-                    }
-                    
-                    const tools = message.commands || [];
-                    log(`Found ${tools.length} tools`);
-                    assert.ok(tools.length > 0, 'Should discover at least one tool');
-                    clearTimeout(timeout);
-                    cleanup();
-                    resolve();
-                }
-            };
-
-            const cleanup = () => {
-                if (panel) {
-                    panel.dispose();
-                }
-            };
-
-            // Now open the MCP Tools panel
-            log('Opening MCP Tools panel');
-            Promise.resolve(vscode.commands.executeCommand('mcpTools.openPanel'))
-                .then(async () => {
-                    log('MCP Tools panel opened');
-                    
-                    // Wait a bit for the panel to be fully initialized
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    
-                    // Get the panel through the extension's exports
-                    log('Getting panel from extension exports');
-                    panel = ext.exports.getWebviewPanel();
-                    if (!panel) {
-                        log('Panel not found in extension exports');
-                        // Try finding it through visible editors as fallback
-                        const panels = vscode.window.visibleTextEditors
-                            .filter(editor => editor.document.uri.scheme === 'vscode-webview')
-                            .map(editor => editor.document.uri);
-                        
-                        log(`Found ${panels.length} webview panels`);
-                        if (panels.length === 0) {
-                            throw new Error('MCP Tools panel not found');
-                        }
-                        
-                        // Since we found panels but couldn't get the panel from exports,
-                        // something is wrong with our setup
-                        throw new Error('Could not access MCP Tools panel');
-                    }
-                    
-                    log('Successfully got panel from extension exports');
-                    
-                    // Set up message listener
-                    panel.webview.onDidReceiveMessage(messageListener);
-                })
-                .catch((error: Error) => {
-                    log(`Error opening MCP Tools panel: ${error}`);
-                    clearTimeout(timeout);
-                    cleanup();
-                    reject(error);
-                });
-        });
-
-        // Wait for tool discovery to complete
-        await toolDiscoveryPromise;
-        log('Tool discovery completed successfully');
-    });
+  it('should discover global tools', async () => {
+    logHeader('Testing global tool discovery');
+    const tools = await scanWorkspaceTools(getTestMonorepoPath());
+    
+    logStep('Verifying global tools');
+    const globalTools = Array.from(tools.values()).filter(t => t.type === 'global-bin');
+    expect(globalTools.length).toBe(3);
+    expect(globalTools.some(t => t.name === 'npm')).toBe(true);
+    expect(globalTools.some(t => t.name === 'yarn')).toBe(true);
+    expect(globalTools.some(t => t.name === 'pnpm')).toBe(true);
+    logSuccess('Found expected global tools');
+  });
 }); 

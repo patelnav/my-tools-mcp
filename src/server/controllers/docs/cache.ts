@@ -5,7 +5,7 @@
  * repeated command execution.
  */
 
-import { DocumentationResponse } from '@/types/types';
+import type { DocumentationResponse } from '@/types/types';
 import { logger } from './logger';
 
 class DocumentationCache {

@@ -106,7 +106,7 @@ function getWorkspacePatterns(pkg: PackageJson): string[] {
  * @param patterns Glob patterns to match
  * @returns Promise<string[]> Array of package.json paths
  */
-async function findPackageJsonFiles(dir: string, patterns: string[] = ['**/package.json']): Promise<string[]> {
+async function findPackageJsonFiles(dir: string, _patterns: string[] = ['**/package.json']): Promise<string[]> {
   const results: string[] = [];
   
   async function scan(currentDir: string): Promise<void> {
@@ -380,7 +380,7 @@ function getPackageManagerCommands(packageManager: PackageManager): Command[] {
 /**
  * Tests if a command is available and can show help/version
  */
-async function probeToolCapabilities(command: string): Promise<ToolMetadata | null> {
+export async function probeToolCapabilities(command: string): Promise<ToolMetadata | null> {
   const metadata: ToolMetadata = {
     name: command,
     hasHelpFlag: false

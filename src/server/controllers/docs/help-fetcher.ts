@@ -14,7 +14,7 @@ import type { ToolInfo } from './path-scanner';
  * @param projectPath Path to execute from
  * @returns Promise<string>
  */
-export async function getToolHelpText(tool: ToolInfo, projectPath: string): Promise<string> {
+export async function getToolHelpText(tool: ToolInfo, _projectPath: string): Promise<string> {
   try {
     // Don't try to get help text for npm scripts
     if (tool.type === 'script' || tool.type === 'npm-script') {

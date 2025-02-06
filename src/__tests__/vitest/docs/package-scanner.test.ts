@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { join } from 'path';
-import { scanWorkspaceTools, getToolInfo, type ToolInfo, clearToolCache } from '../../server/controllers/docs/path-scanner';
+import { scanWorkspaceTools, getToolInfo, type ToolInfo, clearToolCache } from '@server/controllers/docs/path-scanner';
 import { env } from '@/env';
+import { getTestMonorepoPath } from '@test/shared/workspace';
 
-const MONOREPO_ROOT = join(__dirname, '../fixtures/test-monorepo');
+const MONOREPO_ROOT = getTestMonorepoPath();
 const MOCK_BIN_PATH = join(MONOREPO_ROOT, 'bin');
 const NODE_MODULES_BIN = join(MONOREPO_ROOT, 'node_modules', '.bin');
 
@@ -46,7 +47,8 @@ describe('Package Scanner', () => {
         workingDirectory: MONOREPO_ROOT,
         type: 'npm-script',
         context: {
-          scriptSource: expect.stringContaining('package.json')
+          scriptSource: expect.stringContaining('package.json'),
+          script: "echo 'test'"
         }
       });
 
@@ -58,7 +60,8 @@ describe('Package Scanner', () => {
         workingDirectory: MONOREPO_ROOT,
         type: 'npm-script',
         context: {
-          scriptSource: expect.stringContaining('package.json')
+          scriptSource: expect.stringContaining('package.json'),
+          script: "echo 'build'"
         }
       });
     });

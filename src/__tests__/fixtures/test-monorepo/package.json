@@ -19,10 +19,12 @@
     "db:check": "drizzle-kit check"
   },
   "dependencies": {
+    "drizzle-orm": "^0.29.0"
+  },
+  "devDependencies": {
     "vite": "^5.0.0",
     "vitest": "^1.0.0",
     "drizzle-kit": "^0.20.0",
-    "drizzle-orm": "^0.29.0",
     "tsup": "^8.0.0",
     "eslint": "^8.0.0"
   }
