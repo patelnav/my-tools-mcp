@@ -64,7 +64,8 @@ export function App({ vscode }: AppProps) {
   useEffect(() => {
     const handleMessage = (event: MessageEvent<VSCodeMessage>) => {
       const message = event.data;
-      console.log('[App] Received VS Code message:', message);
+      // Only log message type, not the full payload
+      console.log('[App] Received message type:', message.type);
 
       switch (message.type) {
         case 'WEBVIEW_READY_CONFIRMED':
@@ -134,10 +135,33 @@ export function App({ vscode }: AppProps) {
               {documentation.data.version && (
                 <span className="text-sm text-gray-500">v{documentation.data.version}</span>
               )}
+              <span className="animate-pulse bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs px-2 py-1 rounded">
+                Updated
+              </span>
             </div>
-            <pre className="p-4 bg-gray-50 dark:bg-gray-800 rounded overflow-auto font-mono text-sm text-gray-900 dark:text-gray-100">
-              {documentation.data.helpText}
-            </pre>
+            <div className="relative">
+              <pre className="p-4 bg-gray-50 dark:bg-gray-800 rounded overflow-auto font-mono text-sm text-gray-900 dark:text-gray-100">
+                {documentation.data.helpText}
+              </pre>
+              <button 
+                onClick={() => {
+                  if (documentation.data?.helpText) {
+                    navigator.clipboard.writeText(documentation.data.helpText);
+                    const button = document.getElementById('copy-button');
+                    if (button) {
+                      button.textContent = 'Copied!';
+                      setTimeout(() => {
+                        button.textContent = 'Copy';
+                      }, 2000);
+                    }
+                  }
+                }}
+                id="copy-button"
+                className="absolute top-2 right-2 px-3 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+              >
+                Copy
+              </button>
+            </div>
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Last updated: {new Date(documentation.data.lastUpdated).toLocaleString()}
             </p>

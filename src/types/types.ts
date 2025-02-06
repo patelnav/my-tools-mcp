@@ -69,8 +69,7 @@ export type VSCodeMessageType =
   | 'HELLO_RESPONSE'
   | 'DOCUMENTATION_UPDATED'
   | 'WEBVIEW_READY'
-  | 'WEBVIEW_READY_CONFIRMED'
-  | 'GET_SERVER_PORT';
+  | 'WEBVIEW_READY_CONFIRMED';
 
 export interface BaseVSCodeMessage<T = unknown> {
   type: VSCodeMessageType;
@@ -132,10 +131,6 @@ export interface WebViewReadyConfirmedMessage extends BaseVSCodeMessage {
   type: 'WEBVIEW_READY_CONFIRMED';
 }
 
-export interface GetServerPortMessage extends BaseVSCodeMessage {
-  type: 'GET_SERVER_PORT';
-}
-
 export type VSCodeMessage = 
   | WorkspacePathMessage
   | WebSocketStatusMessage
@@ -147,5 +142,4 @@ export type VSCodeMessage =
   | DocumentationUpdatedMessage
   | GetWorkspacePathMessage
   | WebViewReadyMessage
-  | WebViewReadyConfirmedMessage
-  | GetServerPortMessage; 
+  | WebViewReadyConfirmedMessage; 

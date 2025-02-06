@@ -297,6 +297,42 @@ describe('MCP Server Integration', () => {
         ws.close();
       }
     });
+
+    it('should provide properly formatted documentation', async () => {
+      logHeader('Testing documentation format and content');
+      const ws = await createTestWebSocket(getWsUrl(), wsOptions);
+      
+      try {
+        logStep('Discovering tools');
+        ws.send(JSON.stringify({
+          type: WS_MESSAGE_TYPES.DISCOVER_TOOLS,
+          payload: { projectPath: getTestWorkspacePath() }
+        }));
+        await waitForWsMessage(ws, WS_MESSAGE_TYPES.TOOLS_DISCOVERED, TIMEOUTS.STANDARD);
+        
+        logStep('Requesting git documentation');
+        selectTool(ws, 'git');
+        const docMessage = await waitForWsMessage(ws, WS_MESSAGE_TYPES.DOCUMENTATION_UPDATED, TIMEOUTS.DOC_FETCH);
+        const doc = docMessage.payload as DocumentationResponse;
+        
+        // Verify documentation structure
+        expect(doc.success).toBe(true);
+        expect(doc.data).toBeDefined();
+        expect(doc.data?.name).toBe('git');
+        expect(doc.data?.version).toMatch(/^git version \d+\.\d+\.\d+/); // Match actual git version format
+        expect(doc.data?.helpText).toBeDefined();
+        expect(doc.data?.lastUpdated).toBeDefined();
+        
+        // Verify documentation content
+        expect(doc.data?.helpText).toContain('git - the stupid content tracker');
+        expect(doc.data?.helpText).toContain('usage: git');
+        expect(doc.data?.helpText.length).toBeGreaterThan(50);
+        
+        logSuccess('Documentation format and content verified');
+      } finally {
+        ws.close();
+      }
+    });
   });
 
   describe('Error Handling', () => {

@@ -22,7 +22,7 @@ export class MyToolsPanel {
       // Handle messages from the webview
       this._panel.webview.onDidReceiveMessage(
         async message => {
-          console.log('Received message from WebView:', message);
+          // console.log('Received message from WebView:', message);
           switch (message.type) {
             case 'WEBVIEW_READY':
               console.log('WebView is ready');

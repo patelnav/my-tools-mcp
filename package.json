@@ -30,8 +30,7 @@
     "test:vitest": "NODE_ENV=test vitest run --config ./vitest.config.ts",
     "test:vitest:watch": "NODE_ENV=test vitest --config ./vitest.config.ts",
     "test:vitest:ui": "NODE_ENV=test vitest --ui --config ./vitest.config.ts",
-    "test": "pnpm test:vitest",
-    "test:all": "pnpm test:vitest && pnpm test:vscode",
+    "test": "pnpm test:vitest && pnpm test:vscode",
     "clean": "rimraf dist out"
   },
   "dependencies": {

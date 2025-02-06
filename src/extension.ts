@@ -3,16 +3,12 @@ import { startMCPServer, setLogCallback } from './server';
 import { MyToolsPanel } from './panel/MyToolsPanel';
 import http from 'http';
 import type { AddressInfo } from 'net';
-import * as path from 'path';
 import { getWorkspacePath } from './utils/workspace';
 import type { WebSocketServer } from 'ws';
 
 let mcpServer: http.Server | undefined;
 let mcpWss: WebSocketServer | undefined;
 let serverPromise: Promise<{ httpServer: http.Server; wsServer: WebSocketServer }> | undefined;
-let retryCount = 0;
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000; // 1 second
 let serverStatusItem: vscode.StatusBarItem;
 
 // Debug mode configuration
@@ -20,10 +16,6 @@ const DEBUG_MODE = true;
 let debugStatusBar: vscode.StatusBarItem | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 let isDebugInitialized = false;
-
-// Add these constants at the top with other constants
-const MCP_PORT_START = 54321;
-const MCP_PORT_END = 54421;
 
 // Export for testing
 export function getServer(): http.Server | undefined {
@@ -134,36 +126,6 @@ export function getServerPort(server: http.Server | undefined): number | undefin
     log(`Error getting server port: ${error}`, 'error');
     return undefined;
   }
-}
-
-async function checkPortInUse(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const tester = http.get(`http://localhost:${port}/health`, {
-      timeout: 1000,
-      headers: { 'Accept': 'application/json' }
-    }, (res) => {
-      // If we get any response, port is in use
-      resolve(res.statusCode === 200);
-    });
-    
-    tester.on('error', () => {
-      resolve(false);
-    });
-  });
-}
-
-async function findExistingServer(): Promise<number | undefined> {
-  log('Checking for existing MCP server...');
-  
-  for (let port = MCP_PORT_START; port <= MCP_PORT_END; port++) {
-    if (await checkPortInUse(port)) {
-      log(`Found existing server on port ${port}`);
-      return port;
-    }
-  }
-  
-  log('No existing server found');
-  return undefined;
 }
 
 async function checkServerHealth(): Promise<boolean> {

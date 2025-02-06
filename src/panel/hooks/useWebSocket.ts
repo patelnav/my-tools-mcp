@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { 
-  Command,
+  ToolInfo,
   WebSocketMessage,
   VSCodeMessage,
   DocumentationResponse
@@ -10,7 +10,7 @@ interface WebSocketState {
   ws: WebSocket | null;
   isConnected: boolean;
   error: string | null;
-  availableTools: Command[];
+  availableTools: ToolInfo[];
   documentation: DocumentationResponse | null;
 }
 
@@ -26,7 +26,7 @@ export function useWebSocket({ serverPort, workspacePath, vscode }: UseWebSocket
   const [ws, setWs] = useState<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [availableTools, setAvailableTools] = useState<Command[]>([]);
+  const [availableTools, setAvailableTools] = useState<ToolInfo[]>([]);
   const [documentation, setDocumentation] = useState<DocumentationResponse | null>(null);
 
   useEffect(() => {
@@ -55,21 +55,29 @@ export function useWebSocket({ serverPort, workspacePath, vscode }: UseWebSocket
     socket.addEventListener('message', (event) => {
       try {
         const message = JSON.parse(event.data) as WebSocketMessage;
-        console.log('[WebSocket] Received:', message);
+        console.log('[WebSocket] Received message type:', message.type);
 
         switch (message.type) {
           case 'TOOLS_DISCOVERED':
             if (Array.isArray(message.payload)) {
-              setAvailableTools(message.payload as Command[]);
+              const toolCount = message.payload.length;
+              console.log(`[WebSocket] Discovered ${toolCount} tools`);
+              setAvailableTools(message.payload as ToolInfo[]);
               vscode.postMessage({ 
                 type: 'TOOLS_DISCOVERED', 
-                payload: message.payload as Command[] 
+                payload: message.payload as ToolInfo[] 
               });
             }
             break;
           case 'DOCUMENTATION_UPDATED':
             if (message.payload && typeof message.payload === 'object') {
-              setDocumentation(message.payload as DocumentationResponse);
+              const doc = message.payload as DocumentationResponse;
+              console.log(`[WebSocket] Documentation updated for: ${doc.data?.name}`);
+              setDocumentation(doc);
+              vscode.postMessage({ 
+                type: 'DOCUMENTATION_UPDATED', 
+                payload: doc 
+              });
             }
             break;
           case 'ERROR':

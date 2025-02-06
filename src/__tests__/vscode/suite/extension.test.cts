@@ -79,19 +79,20 @@ suite('MCP Tools Extension', () => {
             let websocketConnected = false;
 
             const disposable = panel.webview.onDidReceiveMessage(message => {
-                console.log(`[${new Date().toISOString()}] Received message:`, message);
+                // Only log message type, not payload
+                if (message.type !== 'TOOLS_DISCOVERED') {
+                    console.log(`[Test] Received message type: ${message.type}`);
+                }
                 
                 switch (message.type) {
                     case 'WEBVIEW_READY':
                         webviewReady = true;
-                        console.log(`[${new Date().toISOString()}] WebView ready, confirming...`);
                         panel.webview.postMessage({ type: 'WEBVIEW_READY_CONFIRMED' });
                         break;
 
                     case 'GET_WORKSPACE_PATH':
                         assert.ok(webviewReady, 'WebView should be ready before workspace path is requested');
                         workspacePathSent = true;
-                        console.log(`[${new Date().toISOString()}] Sending workspace path...`);
                         const serverPort = ext.exports.getServerPort();
                         panel.webview.postMessage({
                             type: 'WORKSPACE_PATH',
@@ -104,7 +105,6 @@ suite('MCP Tools Extension', () => {
                         if (message.status === 'connected') {
                             assert.ok(workspacePathSent, 'WebSocket should connect after workspace path is sent');
                             websocketConnected = true;
-                            console.log(`[${new Date().toISOString()}] WebSocket connected`);
                         }
                         break;
 
@@ -124,7 +124,6 @@ suite('MCP Tools Extension', () => {
                             assert.ok(tool.type, 'Tool should have a type');
                             assert.ok(tool.workingDirectory, 'Tool should have a working directory');
 
-                            console.log(`[${new Date().toISOString()}] Tools discovered:`, message.payload);
                             clearTimeout(timeout);
                             disposable.dispose();
                             resolve();
