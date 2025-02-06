@@ -1,14 +1,13 @@
 import * as vscode from 'vscode';
-import { startMCPServer, setLogCallback } from './server';
+import { startMcpServer } from './server/mcp';
 import { MyToolsPanel } from './panel/MyToolsPanel';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import { getWorkspacePath } from './utils/workspace';
-import type { WebSocketServer } from 'ws';
+import { cacheWorkspaceTools, clearWorkspaceCache } from './server/cache';
 
 let mcpServer: http.Server | undefined;
-let mcpWss: WebSocketServer | undefined;
-let serverPromise: Promise<{ httpServer: http.Server; wsServer: WebSocketServer }> | undefined;
+let serverPromise: Promise<http.Server> | undefined;
 let serverStatusItem: vscode.StatusBarItem;
 
 // Debug mode configuration
@@ -191,18 +190,15 @@ async function tryStartServer(): Promise<http.Server> {
     
     // Start MCP server with workspace path
     log(`Starting MCP server with path: ${workspacePath}`);
-    const isTest = process.env.VSCODE_TEST === 'true';
-    serverPromise = startMCPServer(workspacePath, isTest);
+    serverPromise = startMcpServer(log);
     
     // Add timeout to server startup
-    const timeoutPromise = new Promise<{ httpServer: http.Server; wsServer: WebSocketServer }>((_, reject) => {
+    const timeoutPromise = new Promise<http.Server>((_, reject) => {
       setTimeout(() => reject(new Error('Server startup timed out after 30s')), 30000);
     });
     
     log('Waiting for server to start...');
-    const { httpServer, wsServer } = await Promise.race([serverPromise, timeoutPromise]);
-    mcpServer = httpServer;
-    mcpWss = wsServer;
+    mcpServer = await Promise.race([serverPromise, timeoutPromise]);
     
     if (!mcpServer) {
       throw new Error('Server failed to start - server instance is undefined');
@@ -261,9 +257,6 @@ export async function activate(context: vscode.ExtensionContext) {
   setupDebugMode(context);
 
   try {
-    // Set up logging callback
-    setLogCallback(log);
-
     // Create status bar item
     serverStatusItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Left,
@@ -272,6 +265,19 @@ export async function activate(context: vscode.ExtensionContext) {
     serverStatusItem.text = "$(sync~spin) MCP: Starting...";
     serverStatusItem.show();
     context.subscriptions.push(serverStatusItem);
+
+    // Get workspace path
+    const workspacePath = getWorkspacePath();
+    
+    // Cache tools during activation when we have full permissions
+    log('Caching workspace tools...');
+    try {
+      await cacheWorkspaceTools(workspacePath);
+      log('Workspace tools cached successfully');
+    } catch (error) {
+      log(`Failed to cache workspace tools: ${error}`, 'error');
+      // Continue activation - we can try caching again later
+    }
 
     // Start server
     const server = await tryStartServer();
@@ -309,9 +315,9 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-  if (mcpWss) {
-    mcpWss.close();
-  }
+  const workspacePath = getWorkspacePath();
+  clearWorkspaceCache(workspacePath);
+  
   if (mcpServer) {
     mcpServer.close();
   }
