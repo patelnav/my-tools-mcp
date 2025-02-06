@@ -1,15 +1,32 @@
 # MCP Tools Documentation
 
-A VSCode/Cursor extension that provides an integrated MCP server and UI panel for retrieving and displaying command-line tool documentation. The extension automatically detects your workspace and provides real-time documentation updates for your selected tools.
+A VSCode/Cursor extension that provides an integrated MCP server and UI panel for retrieving and displaying command-line tool documentation. The extension automatically detects tools in your workspace and provides their documentation through a WebView panel.
 
-## Features
+## Core Features
 
-- 🔄 Built-in MCP server with WebSocket support
-- 🎯 Real-time documentation updates
-- 📚 Automatic version detection
-- 💾 Smart documentation caching
-- 🎨 Modern UI with Tailwind CSS
-- ⚡ Fast and responsive WebView panel
+- 🔄 **Built-in MCP Server**
+  - Express + WebSocket server (ports 54321-54421)
+  - Secure origin validation
+  - Automatic port selection
+  - Connection management and cleanup
+
+- 🔍 **Tool Discovery**
+  - Package scripts (npm, yarn, pnpm)
+  - Local binaries (node_modules/.bin)
+  - Global tools (git, npm, yarn, pnpm)
+  - Monorepo workspace support
+
+- 📚 **Documentation Retrieval**
+  - Help command execution (-h, --help)
+  - Version information fetching
+  - Secure command validation
+  - Error handling
+
+- 💻 **VS Code Integration**
+  - React-based WebView panel
+  - Status bar integration
+  - Command palette support
+  - Workspace path detection
 
 ## Architecture
 
@@ -18,7 +35,7 @@ A VSCode/Cursor extension that provides an integrated MCP server and UI panel fo
 Extension Host (src/extension.ts)
 ├── Activates when VS Code starts
 ├── Creates MCP Server
-│   └── Express + WebSocket Server
+│   └── Express + WebSocket Server (54321-54421 port range)
 └── Creates WebView Panel
 ```
 
@@ -29,15 +46,11 @@ MCP Server (src/server/*)
 │   ├── Handles 'GET_AVAILABLE_TOOLS' messages
 │   └── Handles 'SELECT_TOOL' messages
 │
-├── Tool Discovery System
-│   ├── path-scanner.ts
-│   │   └── Finds tools in workspace (bin/, node_modules/.bin, scripts)
-│   └── package-scanner.ts
-│       └── Scans package.json for available tools
-│
-└── Tool Execution System
-    └── command-executor.ts
-        └── Executes tools with proper working directory
+└── Tool Discovery System
+    ├── path-scanner.ts
+    │   └── Finds tools in workspace (bin/, node_modules/.bin)
+    └── package-scanner.ts
+        └── Scans package.json for available tools
 ```
 
 ### 3. WebView Panel (Frontend)
@@ -49,33 +62,6 @@ React WebView (src/panel/*)
 └── WebSocket Client
     ├── Requests available tools
     └── Requests tool documentation
-```
-
-### 4. Communication Flow
-```
-User opens extension
-│
-Extension activates
-├── Starts MCP Server
-│   └── Opens WebSocket on available port
-│
-└── Creates WebView Panel
-    │
-    WebView connects to WebSocket
-    │
-    ├── Sends 'GET_AVAILABLE_TOOLS'
-    │   │
-    │   MCP Server
-    │   ├── Uses path-scanner to find tools
-    │   └── Returns tool list to WebView
-    │
-    └── User selects tool
-        │
-        WebView sends 'SELECT_TOOL'
-        │
-        MCP Server
-        ├── Uses command-executor to get tool docs
-        └── Returns documentation to WebView
 ```
 
 ## Project Structure
@@ -90,8 +76,7 @@ my-tools-mcp/
 │   │   └── controllers/     # Tool discovery and execution
 │   │       ├── docs/        # Documentation controllers
 │   │       ├── path-scanner.ts    # Tool discovery
-│   │       ├── package-scanner.ts # Package.json scanning
-│   │       └── command-executor.ts # Secure command execution
+│   │       └── package-scanner.ts # Package.json scanning
 │   ├── panel/              # WebView UI (React)
 │   │   ├── index.tsx      # WebView entry point
 │   │   ├── App.tsx        # Main React component
@@ -99,7 +84,7 @@ my-tools-mcp/
 │   ├── types/             # Shared TypeScript types
 │   └── lib/               # Shared utilities
 ├── dist/                  # Compiled output
-└── tests/                # Test files
+└── src/__tests__/        # Test files
 ```
 
 ## Development Setup
@@ -126,28 +111,53 @@ pnpm run build
 
 1. Open the command palette (Cmd/Ctrl + Shift + P)
 2. Type "MCP Tools" and select the command
-3. Enter a tool name (e.g., "git", "npm")
-4. View the tool's documentation and version information
+3. The WebView panel will open and display available tools
+4. Select a tool to view its documentation
 
-## Features in Detail
+## Technical Details
 
-- **Tool Discovery**
-  - Automatic workspace scanning
-  - Package.json script detection
-  - Binary tool detection
-  - Working directory awareness
+### Tool Discovery
+- **Package Scripts**
+  - Automatically detects npm/yarn/pnpm scripts
+  - Shows script source and working directory
+  - Supports monorepo workspaces
+  - Validates script existence
 
-- **Documentation Retrieval**
-  - Secure command execution
-  - Version detection
-  - Help text parsing
-  - Smart caching
+- **Binary Tools**
+  - Finds tools in node_modules/.bin
+  - Detects global tools (git, npm, yarn, pnpm)
+  - Validates tool existence and permissions
+  - Handles path resolution
 
-- **Modern UI**
-  - Clean, responsive design with Tailwind CSS
-  - Real-time connection status
-  - Error handling and feedback
-  - Documentation syntax highlighting
+### Documentation Retrieval
+- Executes help commands (-h, --help)
+- Fetches version information
+- Handles command execution errors
+- Validates tool names and arguments
+- Implements proper timeouts
+
+### WebSocket Communication
+- Real-time tool discovery updates
+- Secure origin validation
+- Connection management and cleanup
+- Error handling and reporting
+- Automatic reconnection support
+
+### Security Features
+- Tool name validation
+- Command injection prevention
+- Origin validation for WebSocket connections
+- Proper error handling and reporting
+- Resource cleanup
+
+## Testing
+
+The extension includes comprehensive tests:
+- Integration tests for server functionality
+- VS Code extension tests
+- Tool discovery tests
+- Security validation tests
+- WebSocket communication tests
 
 ## License
 
