@@ -1,121 +1,139 @@
-import { FastMCP } from "fastmcp";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import express from "express";
 import { z } from "zod";
-import { getCachedToolInfo, getCachedToolNames } from './cache';
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { getCachedToolInfo, getCachedToolNames, cacheWorkspaceTools } from './cache';
 import { getWorkspacePath } from '../utils/workspace';
 
-// Response types
-interface TextContent {
-  type: "text";
-  text: string;
-}
+const app = express();
+const PORT = 54321;
 
-interface ToolInfo {
-  name: string;
-  helpText: string;
-  isExecutable: boolean;
-  lastUpdated: number;
-}
+// Tool input schemas
+const ListToolsInputSchema = z.object({
+  projectPath: z.string().optional().describe("Optional workspace path")
+});
 
-interface ErrorResponse {
-  error: string;
-  toolName?: string;
-  workspace?: string;
-}
+const GetToolInfoInputSchema = z.object({
+  toolName: z.string().describe("Name of the tool"),
+  projectPath: z.string().optional().describe("Optional workspace path")
+});
 
-/**
- * Create and configure MCP server
- */
-export async function createMcpServer(logFn: (message: string, type?: 'info' | 'error' | 'warn') => void) {
-  // Create FastMCP server
-  const server = new FastMCP({
-    name: "my-tools",
-    version: "1.0.0"
+export async function createServer() {
+  // Initialize cache
+  const defaultWorkspacePath = getWorkspacePath();
+  await cacheWorkspaceTools(defaultWorkspacePath);
+
+  const server = new Server(
+    {
+      name: "my-tools",
+      version: "1.0.0"
+    },
+    {
+      capabilities: {
+        tools: {},
+      },
+    }
+  );
+
+  // Add list-available-tools handler
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const tools = [
+      {
+        name: "list-available-tools",
+        description: "Lists all available tools in the workspace",
+        inputSchema: zodToJsonSchema(ListToolsInputSchema, { name: "list-tools" })
+      },
+      {
+        name: "get-tool-info",
+        description: "Get detailed information about a specific tool",
+        inputSchema: zodToJsonSchema(GetToolInfoInputSchema, { name: "get-tool-info" })
+      }
+    ];
+
+    return { tools };
   });
 
-  // Add list-available-tools tool
-  server.addTool({
-    name: "list-available-tools",
-    description: "Lists all available tools in the workspace",
-    parameters: z.object({
-      projectPath: z.string().optional().describe("Optional workspace path")
-    }),
-    execute: async (args: { projectPath?: string }): Promise<TextContent> => {
-      logFn('Handling list-available-tools request');
-      const wsPath = args.projectPath || getWorkspacePath();
-      const toolNames = getCachedToolNames(wsPath);
-      logFn(`Listing ${toolNames.length} tools for workspace: ${wsPath}`);
+  // Add tool execution handler
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    
+    if (name === "list-available-tools") {
+      const validatedArgs = ListToolsInputSchema.parse(args);
+      const workspacePath = validatedArgs.projectPath || defaultWorkspacePath;
+      const toolNames = getCachedToolNames(workspacePath);
       return {
-        type: "text",
-        text: JSON.stringify(toolNames)
+        content: [{ 
+          type: "text", 
+          text: JSON.stringify(toolNames) 
+        }]
       };
     }
-  });
 
-  // Add get-tool-info tool
-  server.addTool({
-    name: "get-tool-info",
-    description: "Get detailed information about a specific tool",
-    parameters: z.object({
-      toolName: z.string().describe("Name of the tool"),
-      projectPath: z.string().optional().describe("Optional workspace path")
-    }),
-    execute: async (args: { toolName: string, projectPath?: string }): Promise<TextContent> => {
-      logFn('Handling get-tool-info request');
-      const wsPath = args.projectPath || getWorkspacePath();
-      const toolInfo = getCachedToolInfo(wsPath, args.toolName);
-
+    if (name === "get-tool-info") {
+      const validatedArgs = GetToolInfoInputSchema.parse(args);
+      const workspacePath = validatedArgs.projectPath || defaultWorkspacePath;
+      const toolInfo = getCachedToolInfo(workspacePath, validatedArgs.toolName);
       if (!toolInfo) {
-        logFn(`Tool not found: ${args.toolName} in workspace: ${wsPath}`, 'warn');
-        const errorResponse: ErrorResponse = {
-          error: "Tool not found",
-          toolName: args.toolName,
-          workspace: wsPath
-        };
-        return {
-          type: "text",
-          text: JSON.stringify(errorResponse)
-        };
+        throw new Error(`Tool not found: ${validatedArgs.toolName}`);
       }
 
-      logFn(`Retrieved info for tool: ${args.toolName}`);
-      const response: ToolInfo = {
-        name: args.toolName,
-        ...toolInfo
-      };
       return {
-        type: "text",
-        text: JSON.stringify(response)
+        content: [{ 
+          type: "text", 
+          text: JSON.stringify({
+            name: validatedArgs.toolName,
+            ...toolInfo
+          })
+        }]
       };
     }
+
+    throw new Error(`Unknown tool: ${name}`);
   });
 
-  return server;
+  return { server };
 }
 
-/**
- * Start MCP server
- */
-export async function startMcpServer(logFn: (message: string, type?: 'info' | 'error' | 'warn') => void) {
-  try {
-    const server = await createMcpServer(logFn);
-    return server;
-  } catch (error) {
-    logFn(`Failed to start MCP server: ${error}`, 'error');
-    throw error;
-  }
-}
-
-// If this file is run directly, start the server
+// Start server if run directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  startMcpServer(console.log).then(server => {
-    server.start({
-      transportType: "sse",
-      sse: {
-        endpoint: "/sse",
-        port: 8080
-      }
+  createServer().then(({ server }) => {
+    let transport: SSEServerTransport;
+
+    app.get("/sse", async (req, res) => {
+      console.log("Received SSE connection");
+      transport = new SSEServerTransport("/message", res);
+      await server.connect(transport);
+
+      req.on('close', async () => {
+        console.log("Connection closed");
+        await transport.close();
+      });
     });
-  }).catch((error) => {
+
+    app.post("/message", async (req, res) => {
+      console.log("Received message");
+      if (!transport) {
+        console.error("No transport available");
+        res.status(500).end();
+        return;
+      }
+      await transport.handlePostMessage(req, res);
+    });
+
+    app.listen(PORT, () => {
+      console.log(`Server is running on http://localhost:${PORT}/sse`);
+    });
+
+    process.on('SIGINT', async () => {
+      console.log('Shutting down server...');
+      if (transport) {
+        await transport.close();
+      }
+      process.exit(0);
+    });
+  }).catch(error => {
     console.error('Failed to start server:', error);
     process.exit(1);
   });

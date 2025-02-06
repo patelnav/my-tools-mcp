@@ -1,7 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { cacheWorkspaceTools } from './server/cache.js';
-import { getWorkspacePath } from './utils/workspace.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import express from 'express';
+import { createServer } from './server/mcp';
 
 // Simple logger
 function log(message: string, type: 'info' | 'error' | 'warn' = 'info') {
@@ -18,40 +19,67 @@ interface ToolResponse {
   content: TextContent[];
 }
 
-async function main() {
-  try {
-    // Cache tools first
-    log('Caching workspace tools...');
-    const wsPath = getWorkspacePath();
-    await cacheWorkspaceTools(wsPath);
-    log('Tools cached successfully');
+async function startServer() {
+  const app = express();
+  const PORT = 54321;
+  const { server } = await createServer();
+  let transport: SSEServerTransport;
 
-    // Create FastMCP server
-    const server = await import('./server/mcp.js').then(m => m.startMcpServer(log));
-    
-    // Start server with SSE support
-    const port = 8080;
-    server.start({
-      transportType: "sse",
-      sse: {
-        endpoint: "/sse",
-        port,
-      },
+  app.get("/sse", async (req, res) => {
+    log("Received SSE connection");
+    transport = new SSEServerTransport("/message", res);
+    await server.connect(transport);
+
+    req.on('close', async () => {
+      log("Connection closed");
+      await transport.close();
+    });
+  });
+
+  app.post("/message", async (req, res) => {
+    log("Received message");
+    if (!transport) {
+      log("No transport available", 'error');
+      res.status(500).end();
+      return;
+    }
+    await transport.handlePostMessage(req, res);
+  });
+
+  return new Promise<void>((resolve) => {
+    const httpServer = app.listen(PORT, () => {
+      log(`Server is running on http://localhost:${PORT}/sse`);
+      resolve();
     });
 
-    log(`Server running on port ${port}`);
+    // Store server reference for cleanup
+    process.on('SIGINT', async () => {
+      log('Shutting down server...');
+      if (transport) {
+        await transport.close();
+      }
+      httpServer.close();
+      process.exit(0);
+    });
+  });
+}
+
+async function main() {
+  try {
+    // Start the server first
+    log('Starting server...');
+    await startServer();
 
     // Create MCP client
     log('Creating MCP client...');
-    const client = new Client(
-      {
-        name: "test-client",
-        version: "1.0.0"
-      }
-    );
+    const client = new Client({
+      name: "test-client",
+      version: "1.0.0"
+    });
 
     // Connect using SSE transport
-    log('Connecting to server...');
+    const port = 54321; // Match the server port
+    log(`Connecting to server on port ${port}...`);
     const transport = new SSEClientTransport(
       new URL(`http://localhost:${port}/sse`)
     );
@@ -59,20 +87,20 @@ async function main() {
     await client.connect(transport);
     log('Client connected successfully');
 
-    // List available tools
-    log('Listing available tools...');
+    // Test list-available-tools
+    log('Testing list-available-tools...');
     const toolsResponse = await client.callTool({
       name: 'list-available-tools',
       arguments: {}
     }) as ToolResponse;
-    log(`Tools response: ${toolsResponse.content[0].text}`);
-
-    // Get info for each tool
+    
     const tools = JSON.parse(toolsResponse.content[0].text);
-    log(`Found tools: ${JSON.stringify(tools, null, 2)}`);
+    log(`Available tools: ${JSON.stringify(tools, null, 2)}`);
 
+    // Test get-tool-info for each tool
+    log('\nTesting get-tool-info for each tool...');
     for (const toolName of tools) {
-      log(`Getting info for tool: ${toolName}`);
+      log(`\nGetting info for tool: ${toolName}`);
       const infoResponse = await client.callTool({
         name: 'get-tool-info',
         arguments: { toolName }
@@ -83,7 +111,6 @@ async function main() {
     // Clean up
     log('Test completed, cleaning up...');
     await transport.close();
-    server.stop();
     process.exit(0);
   } catch (error) {
     log(`Test failed: ${error}`, 'error');

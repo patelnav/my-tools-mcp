@@ -61,8 +61,8 @@ We already have:
 
 ## Implementation Plan
 
-### Phase 1: Setup Workspace-Aware Caching
-- [ ] Create cache management module (src/server/cache.ts):
+### Phase 1: Setup Workspace-Aware Caching ✅
+- [x] Create cache management module (src/server/cache.ts):
     ```typescript
     // Global cache map keyed by workspace path
     const workspaceToolCache = new Map<string, Map<string, ToolInfo>>();
@@ -90,94 +90,20 @@ We already have:
     }
     ```
 
-- [ ] Update extension activation to cache per workspace:
-    ```typescript
-    export async function activate(context: vscode.ExtensionContext) {
-      const workspacePath = getWorkspacePath();
-      
-      // Cache tools during activation when we have full permissions
-      await cacheWorkspaceTools(workspacePath);
-      
-      // Rest of activation...
-    }
+- [x] Update extension activation to cache per workspace
 
-    export function deactivate() {
-      const workspacePath = getWorkspacePath();
-      clearWorkspaceCache(workspacePath);
-    }
-    ```
+### Phase 2: Setup MCP Server ✅
+- [x] Add @modelcontextprotocol/typescript-sdk dependency
+- [x] Create src/server/mcp.ts that uses cached data
 
-### Phase 2: Setup MCP Server
-- [ ] Add @modelcontextprotocol/typescript-sdk dependency
-- [ ] Create src/server/mcp.ts that uses cached data:
-    ```typescript
-    import { McpServer } from "@modelcontextprotocol/sdk/server";
-    import { getWorkspaceCache } from './cache';
-    
-    const server = new McpServer({
-      name: "my-tools",
-      version: "1.0.0"
-    });
-
-    // Use cached tool info
-    server.tool(
-      "get-tool-info",
-      { 
-        toolName: z.string(),
-        projectPath: z.string().optional() 
-      },
-      async ({ toolName, projectPath }) => {
-        const wsPath = projectPath || getWorkspacePath();
-        const wsCache = getWorkspaceCache(wsPath);
-        const cached = wsCache?.get(toolName);
-        
-        if (!cached) {
-          return {
-            content: [{
-              text: JSON.stringify({ error: "Tool not found" })
-            }]
-          };
-        }
-
-        return {
-          content: [{
-            text: JSON.stringify({
-              name: toolName,
-              ...cached
-            }, null, 2)
-          }]
-        };
-      }
-    );
-
-    server.tool(
-      "list-available-tools",
-      { projectPath: z.string().optional() },
-      async ({ projectPath }) => {
-        const wsPath = projectPath || getWorkspacePath();
-        const wsCache = getWorkspaceCache(wsPath);
-        
-        return {
-          content: [{
-            text: JSON.stringify(
-              Array.from(wsCache?.keys() || []),
-              null,
-              2
-            )
-          }]
-        };
-      }
-    );
-    ```
-
-### Phase 3: Update Frontend
+### Phase 3: Update Frontend 🚧
 - [ ] Remove WebSocket code
 - [ ] Add MCP client to frontend (src/panel/client.ts)
 - [ ] Update React components to use MCP client
 - [ ] Update types to match MCP responses
 - [ ] Update error handling
 
-### Phase 4: Cleanup
+### Phase 4: Cleanup ⏳
 - [ ] Remove old WebSocket server code
 - [ ] Update configuration
 - [ ] Update VS Code extension activation events
