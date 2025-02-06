@@ -16,7 +16,7 @@ import type {
   WebSocketStatusMessage,
   HelloResponseMessage,
   GetWorkspacePathMessage
-} from '@/types/types';
+} from '@/types/index';
 import { cn } from '@/utils/cn';
 import { ToolSelector } from './components/ToolSelector';
 import { LoadingState } from './components/LoadingState';

@@ -4,7 +4,7 @@ import type {
   WebSocketMessage,
   VSCodeMessage,
   DocumentationResponse
-} from '@/types/types';
+} from '@/types/index';
 
 interface WebSocketState {
   ws: WebSocket | null;

@@ -10,20 +10,22 @@ import { join, dirname } from 'path';
 import { logger } from '@server/controllers/docs/logger';
 import { env } from '@/env';
 import { getWorkspacePath } from '@/utils/workspace';
+import { readFileSync } from 'fs';
+import { type ToolInfo } from '@/types/index';
+import { promisify } from 'util';
+import { execFile as execFileCb } from 'child_process';
+import * as fs from 'fs/promises';
+
+const execFile = promisify(execFileCb);
 
 // Cache of scanned tools per workspace
 const toolCache = new Map<string, { tools: Map<string, ToolInfo>, timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
-export interface ToolInfo {
-  // Required fields
-  name: string;
-  type: 'script' | 'npm-script' | 'package-bin' | 'workspace-bin' | 'global-bin';
-  
-  // Optional fields
-  location?: string;
-  workingDirectory?: string;
-  context?: Record<string, unknown>;
+export interface ToolScannerOptions {
+  types?: string[];
+  categories?: string[];
+  debug?: boolean;
 }
 
 interface PackageJson {
@@ -308,15 +310,99 @@ export async function getToolInfo(
 }
 
 /**
- * Gets a list of all available tools in the workspace
- * @param workspacePath The workspace path to scan
- * @returns Promise<ToolInfo[]>
+ * Get all available tools in a workspace
+ * @param workspacePath Path to workspace root
+ * @param options Optional scanner configuration
+ * @returns Array of tool info objects
  */
 export async function getAvailableTools(
-  workspacePath: string
+  workspacePath: string,
+  options: ToolScannerOptions = {}
 ): Promise<ToolInfo[]> {
-  const tools = await scanWorkspaceTools(workspacePath);
-  return [...tools.values()];
+  logger.debug('Scanning workspace for tools:', { workspacePath, options });
+  
+  const tools: ToolInfo[] = [];
+  const { types = [] } = options;
+
+  try {
+    // Only scan if no type filter or 'npm-script' is included
+    if (!types.length || types.includes('npm-script')) {
+      const packageJsonPath = join(workspacePath, 'package.json');
+      try {
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+        const scripts = packageJson.scripts || {};
+        
+        for (const [name, script] of Object.entries(scripts)) {
+          tools.push({
+            name: `npm:${name}`,
+            type: 'npm-script',
+            workingDirectory: workspacePath,
+            context: { script }
+          });
+        }
+      } catch (error) {
+        logger.debug('No package.json found or invalid format');
+      }
+    }
+
+    // Only scan if no type filter or 'package-bin' is included
+    if (!types.length || types.includes('package-bin')) {
+      const nodeModulesBinPath = join(workspacePath, 'node_modules', '.bin');
+      try {
+        const binFiles = await readdir(nodeModulesBinPath, { withFileTypes: true });
+        for (const file of binFiles) {
+          const fullPath = join(nodeModulesBinPath, file.name);
+          if (file.isFile()) {
+            const stats = await fs.stat(fullPath);
+            if (stats.mode & 0o111) { // Check if executable
+              tools.push({
+                name: file.name,
+                type: 'package-bin',
+                location: fullPath,
+                workingDirectory: workspacePath
+              });
+            }
+          }
+        }
+      } catch (error) {
+        logger.debug('No node_modules/.bin directory found');
+      }
+    }
+
+    // Only scan if no type filter or 'global-bin' is included
+    if (!types.length || types.includes('global-bin')) {
+      const commonTools = ['git', 'node', 'npm', 'yarn', 'pnpm'];
+      for (const tool of commonTools) {
+        try {
+          const result = await execFile('which', [tool]);
+          if (result.stdout) {
+            tools.push({
+              name: tool,
+              type: 'global-bin',
+              workingDirectory: workspacePath
+            });
+          }
+        } catch (error) {
+          // Tool not found, skip
+        }
+      }
+    }
+
+    if (options.debug) {
+      logger.debug('Tools found:', {
+        total: tools.length,
+        byType: tools.reduce((acc, tool) => {
+          acc[tool.type] = (acc[tool.type] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>)
+      });
+    }
+
+    return tools;
+  } catch (error) {
+    logger.error('Error scanning workspace:', error);
+    throw error;
+  }
 }
 
 /**

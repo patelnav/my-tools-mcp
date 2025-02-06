@@ -5,7 +5,7 @@
  * validation, command execution, and caching of tool documentation.
  */
 
-import type { DocumentationResponse, ToolSelection } from '@/types/types';
+import type { DocumentationResponse, ToolSelection } from '@/types/index';
 import { validateToolName } from './security';
 import { validateProjectPath, confirmDirectoryExists } from './path-validator';
 import { isToolExecutable } from './command-executor';

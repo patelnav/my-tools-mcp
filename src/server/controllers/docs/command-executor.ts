@@ -4,8 +4,8 @@
  * Handles secure execution of tool commands for version and help text retrieval.
  */
 
-import type { ToolInfo } from './path-scanner';
 import { spawn } from 'child_process';
+import type { ToolInfo } from '@/types/index';
 import { logger } from './logger';
 import { existsSync } from 'fs';
 import { getWorkspacePath } from '@/utils/workspace';
@@ -38,7 +38,7 @@ export async function executeTool(
   args: string[],
   options: Partial<CommandOptions> = {}
 ): Promise<CommandResult> {
-  let command: string;
+  let command = tool.name; // Initialize with tool name as default
   let finalArgs: string[] = [...args];
   const finalOptions: CommandOptions = {
     cwd: tool.workingDirectory || getWorkspacePath(),
@@ -53,28 +53,63 @@ export async function executeTool(
     currentDir: getWorkspacePath()
   });
 
-  switch (tool.type) {
-    case 'npm-script':
-      command = 'npm';
-      finalArgs = ['run', tool.name.replace('npm:', ''), ...args];
-      break;
-    
-    case 'package-bin':
-    case 'workspace-bin':
-      command = tool.location || tool.name;
-      logger.debug('Resolved command path:', {
-        command,
-        location: tool.location,
-        name: tool.name,
-        exists: existsSync(command)
-      });
-      break;
-    
-    default:
-      throw new Error(`Unknown tool type: ${(tool as ToolInfo).type}`);
-  }
+  try {
+    switch (tool.type) {
+      case 'npm-script':
+        command = 'npm';
+        finalArgs = ['run', tool.name.replace('npm:', ''), ...args];
+        break;
+      
+      case 'package-bin':
+      case 'workspace-bin':
+        command = tool.location || tool.name;
+        logger.debug('Resolved command path:', {
+          command,
+          location: tool.location,
+          name: tool.name,
+          exists: existsSync(command)
+        });
+        break;
+      
+      case 'global-bin':
+        // For global tools, we don't need to check location since they should be in PATH
+        logger.debug('Using global tool:', {
+          command: tool.name,
+          args
+        });
+        break;
+      
+      default:
+        throw new Error(`Unknown tool type: ${(tool as ToolInfo).type}`);
+    }
 
-  return executeCommand(command, finalArgs, finalOptions);
+    return executeCommand(command, finalArgs, finalOptions);
+  } catch (error) {
+    logger.error('Failed to execute tool:', {
+      tool,
+      args,
+      error,
+      command,
+      finalArgs,
+      options: finalOptions
+    });
+
+    // Enhance error message based on error type
+    if (error instanceof Error) {
+      if (error.message.includes('ENOENT')) {
+        throw new Error(`Tool not found: ${tool.name}. Please ensure it is installed and available in your PATH.`);
+      }
+      if (error.message.includes('EACCES')) {
+        throw new Error(`Permission denied when executing ${tool.name}. Please check file permissions.`);
+      }
+      if (error.message.includes('ETIMEDOUT')) {
+        throw new Error(`Execution of ${tool.name} timed out. Try increasing the timeout value.`);
+      }
+      throw error;
+    }
+    
+    throw new Error(`Failed to execute ${tool.name}: ${error}`);
+  }
 }
 
 /**

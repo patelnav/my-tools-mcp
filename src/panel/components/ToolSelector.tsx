@@ -3,7 +3,7 @@ import { h } from 'preact';
 import type { 
   ToolSelection, 
   ToolInfo
-} from '@/types/types';
+} from '@/types/index';
 import { cn } from '@/utils/cn';
 
 interface ToolSelectorProps {

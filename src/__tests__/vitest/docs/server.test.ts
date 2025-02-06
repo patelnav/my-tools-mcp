@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import WebSocket from 'ws';
-import type { DocumentationResponse } from '@/types/types';
+import type { DocumentationResponse, ToolInfo } from '@/types/index';
 import { TEST_CONFIG } from '../test-config';
 import type { Server } from 'http';
-import type { ToolInfo } from '@server/controllers/docs/path-scanner';
 import type { WsTestOptions } from '@test/utils/test-utils';
 import { createTestWebSocket, waitForWsMessage, getTestWorkspacePath, TEST_MONOREPO_PATH } from '@test/utils/test-utils';
 import { logHeader, logStep, logSuccess } from '@utils/logging';

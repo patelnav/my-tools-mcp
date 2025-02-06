@@ -1,24 +1,24 @@
 /**
- * Help text fetcher module
+ * Help text fetcher for tools
  * 
- * Handles fetching and processing of tool help text documentation.
+ * Handles retrieving help text from tools using various methods.
  */
 
-import { executeTool } from './command-executor';
 import { logger } from './logger';
-import type { ToolInfo } from './path-scanner';
+import type { ToolInfo } from '@/types/index';
+import { executeTool } from './command-executor';
 
 /**
  * Gets the help text for a tool
  * @param tool Tool info
  * @param projectPath Path to execute from
- * @returns Promise<string>
+ * @returns Promise<string> Empty string if no help text available
  */
 export async function getToolHelpText(tool: ToolInfo, _projectPath: string): Promise<string> {
   try {
     // Don't try to get help text for npm scripts
     if (tool.type === 'script' || tool.type === 'npm-script') {
-      return 'Help text not available for npm scripts. This is a custom script defined in package.json.';
+      return ''; // Return empty string instead of generic message
     }
 
     // Only try help flags for binaries and tools
@@ -40,12 +40,12 @@ export async function getToolHelpText(tool: ToolInfo, _projectPath: string): Pro
 
       return fallbackResult.code === 0 && fallbackResult.output.trim()
         ? fallbackResult.output.trim()
-        : 'Help text not available';
+        : ''; // Return empty string instead of generic message
     }
 
-    return 'Help text not available for this type of command';
+    return ''; // Return empty string for unknown types
   } catch (error) {
     logger.warn(`Failed to get help text for ${tool.name}:`, error);
-    return 'Help text not available';
+    return ''; // Return empty string on error
   }
 } 

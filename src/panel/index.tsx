@@ -2,7 +2,7 @@
 import { h, render } from 'preact';
 import { App } from './App';
 import './index.css';
-import type { VSCodeMessage } from '@/types/types';
+import type { VSCodeMessage } from '@/types/index';
 
 declare const acquireVsCodeApi: () => {
   postMessage: (message: VSCodeMessage) => void;
