@@ -394,4 +394,88 @@ describe('MCP Server Integration', () => {
     });
     // Rate limiting test removed temporarily
   });
+
+  describe('SSE Connection Management', () => {
+    it('should maintain initialization state after expected disconnects', async () => {
+      const port = 54321;  // Use fixed port for test
+      
+      // Create SSE client
+      const eventSource = new EventSource(`http://localhost:${port}/sse`);
+      
+      // Track connection state
+      let isConnected = false;
+      let initializeResponse: any = null;
+      
+      // Set up event handlers
+      eventSource.onopen = () => {
+        isConnected = true;
+      };
+      
+      // Wait for connection
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Connection timeout')), 5000);
+        
+        const checkConnection = setInterval(() => {
+          if (isConnected) {
+            clearTimeout(timeout);
+            clearInterval(checkConnection);
+            resolve();
+          }
+        }, 100);
+      });
+      
+      // Send initialize message
+      const response = await fetch(`http://localhost:${port}/message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {
+              tools: true,
+              prompts: false,
+              resources: false,
+              logging: false,
+              roots: {
+                listChanged: false
+              }
+            },
+            clientInfo: {
+              name: 'test-client',
+              version: '1.0.0'
+            }
+          },
+          jsonrpc: '2.0',
+          id: 0
+        })
+      });
+      
+      expect(response.ok).toBe(true);
+      
+      // Close connection
+      eventSource.close();
+      
+      // Wait a bit
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Try to reconnect
+      const newEventSource = new EventSource(`http://localhost:${port}/sse`);
+      
+      // Wait for new connection
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Reconnection timeout')), 5000);
+        
+        newEventSource.onopen = () => {
+          clearTimeout(timeout);
+          resolve();
+        };
+      });
+      
+      // Clean up
+      newEventSource.close();
+    });
+  });
 }); 

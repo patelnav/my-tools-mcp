@@ -1,5 +1,4 @@
-import { startMcpServer } from './server/mcp';
-import type { AddressInfo } from 'net';
+import { startExtensionServer } from './server/index.js';
 
 // Mock workspace path for testing
 process.env.WORKSPACE_PATH = process.cwd();
@@ -10,27 +9,30 @@ function log(message: string, type: 'info' | 'error' | 'warn' = 'info') {
   console.log(`[${timestamp}][${type.toUpperCase()}] ${message}`);
 }
 
-async function main() {
+async function startServer() {
   try {
-    // Start the server
-    const server = await startMcpServer(log);
-    
-    // Get the port number
-    const address = server.address() as AddressInfo;
-    log(`Server running on port ${address.port}`);
-
-    // Handle shutdown
-    process.on('SIGINT', () => {
-      log('Shutting down server...');
-      server.close(() => {
-        log('Server shut down');
-        process.exit(0);
-      });
+    // Start server with fixed port for testing
+    const server = await startExtensionServer({
+      fixedPort: 54321
     });
+    log(`Server started on port ${server.port}`);
+
+    // Handle cleanup on interrupt
+    process.on('SIGINT', async () => {
+      log('Shutting down server...');
+      await server.cleanup();
+      process.exit(0);
+    });
+
+    log('Server ready - Press Ctrl+C to stop');
   } catch (error) {
     log(`Failed to start server: ${error}`, 'error');
     process.exit(1);
   }
 }
 
-main(); 
+// Start the server
+startServer().catch(error => {
+  log(`Unhandled error: ${error}`, 'error');
+  process.exit(1);
+}); 

@@ -1,7 +1,5 @@
 import * as vscode from 'vscode';
 import { getNonce } from '@/utils/getNonce';
-import * as path from 'path';
-import { getWorkspacePath } from '@/utils/workspace';
 
 export class MyToolsPanel {
   public static currentPanel: MyToolsPanel | undefined;
@@ -22,34 +20,76 @@ export class MyToolsPanel {
       // Handle messages from the webview
       this._panel.webview.onDidReceiveMessage(
         async message => {
-          // console.log('Received message from WebView:', message);
+          console.log('Panel received message:', message);
           switch (message.type) {
             case 'WEBVIEW_READY':
               console.log('WebView is ready');
-              // Confirm WebView readiness
+              // Confirm WebView readiness and send initial server status
               this._panel.webview.postMessage({
                 type: 'WEBVIEW_READY_CONFIRMED'
               });
+              if (this._serverPort) {
+                this._panel.webview.postMessage({
+                  type: 'WORKSPACE_PATH',
+                  serverPort: this._serverPort
+                });
+                // Send initial server status
+                this._panel.webview.postMessage({
+                  type: 'MCP_STATUS',
+                  status: 'connected'
+                });
+              }
               break;
-            case 'GET_WORKSPACE_PATH':
-              const workspacePath = getWorkspacePath();
-              console.log('Sending workspace path:', workspacePath);
-              this._panel.webview.postMessage({
-                type: 'WORKSPACE_PATH',
-                path: workspacePath,
-                ...(this._serverPort && { serverPort: this._serverPort })
-              });
+
+            case 'START_SERVER':
+              try {
+                // Call extension's startServer method
+                const port = await vscode.commands.executeCommand<number>('mcpTools.startServer');
+                if (port) {
+                  this._serverPort = port;
+                  this._panel.webview.postMessage({
+                    type: 'WORKSPACE_PATH',
+                    serverPort: port
+                  });
+                  this._panel.webview.postMessage({
+                    type: 'MCP_STATUS',
+                    status: 'connected'
+                  });
+                }
+              } catch (error) {
+                this._panel.webview.postMessage({
+                  type: 'MCP_STATUS',
+                  status: 'error',
+                  error: error instanceof Error ? error.message : String(error)
+                });
+              }
               break;
-            case 'HELLO':
-              console.log('Received hello message, sending response');
-              this._panel.webview.postMessage({
-                type: 'HELLO_RESPONSE',
-                text: 'Hello from WebView!'
-              });
+
+            case 'STOP_SERVER':
+              try {
+                // Call extension's stopServer method
+                await vscode.commands.executeCommand('mcpTools.stopServer');
+                this._serverPort = undefined;
+                this._panel.webview.postMessage({
+                  type: 'MCP_STATUS',
+                  status: 'disconnected'
+                });
+              } catch (error) {
+                this._panel.webview.postMessage({
+                  type: 'MCP_STATUS',
+                  status: 'error',
+                  error: error instanceof Error ? error.message : String(error)
+                });
+              }
               break;
+
+            case 'SHOW_INFO':
+              vscode.window.showInformationMessage(message.message);
+              break;
+
             case 'error':
               vscode.window.showErrorMessage(message.value);
-              return;
+              break;
           }
         },
         null,

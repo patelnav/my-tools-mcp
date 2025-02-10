@@ -1,7 +1,12 @@
 import { getAvailableTools } from './server/controllers/docs/path-scanner';
+import { initializeLogging } from '@/utils/logging';
 import { getWorkspacePath } from './utils/workspace';
 import type { ToolInfo } from '@/types/index';
 import { getToolHelpText } from './server/controllers/docs/help-fetcher';
+import { join } from 'path';
+
+// Initialize logging without VSCode
+initializeLogging(undefined, undefined, true, false);
 
 // Simple logger
 function log(message: string, type: 'info' | 'error' | 'warn' = 'info') {
@@ -62,86 +67,32 @@ async function testToolHelpText(tool: ToolInfo, workspacePath: string, debug = f
 
 async function main() {
   try {
-    const filters: FilterConfig = {
-      types: [],
-      debug: true // Enable detailed logging
-    };
+    const workspacePath = process.cwd();
+    console.log(`Scanning workspace: ${workspacePath}`);
 
-    // Get workspace path (current repo)
-    const workspacePath = getWorkspacePath();
-    log(`Using workspace path: ${workspacePath}`);
-
-    // Get available tools with filters
-    log('Fetching available tools...');
     const tools = await getAvailableTools(workspacePath, {
-      types: filters.types,
-      debug: filters.debug
-    });
-    
-    if (filters.debug) {
-      log(`Total tools found: ${tools.length}`);
-    }
-
-    // Test help text retrieval for each tool
-    log('\nTesting help text retrieval:');
-    
-    // Collect results
-    const results = await Promise.all(tools.map(async tool => {
-      const hasHelp = await testToolHelpText(tool, workspacePath, filters.debug);
-      return {
-        name: tool.name,
-        type: tool.type,
-        hasHelp,
-        location: tool.location || 'N/A',
-        workingDir: tool.workingDirectory || 'N/A'
-      };
-    }));
-
-    // Define column widths
-    const colWidths = [30, 15, 10, 40, 40];
-    
-    // Print table header
-    console.log('\nTool Documentation Status:');
-    console.log(createTableHeader(colWidths));
-    console.log(createTableRow(['Name', 'Type', 'Has Help', 'Location', 'Working Directory'], colWidths));
-    console.log(createTableSeparator(colWidths));
-
-    // Print results
-    results.forEach(result => {
-      console.log(createTableRow([
-        result.name,
-        result.type,
-        result.hasHelp ? '✅' : '❌',
-        result.location,
-        result.workingDir
-      ], colWidths));
+      types: ['global-bin', 'package-bin', 'npm-script'],
+      debug: true
     });
 
-    // Print table footer
-    console.log(createTableFooter(colWidths));
-
-    // Print statistics
-    const helpSuccessCount = results.filter(r => r.hasHelp).length;
-    console.log(`\nStatistics:`);
-    console.log(`Total tools found: ${results.length}`);
-    console.log(`Tools with help text: ${helpSuccessCount}/${results.length}`);
-    
-    // Print type breakdown
-    const typeStats = results.reduce((acc, r) => {
-      acc[r.type] = (acc[r.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    console.log('\nBreakdown by type:');
-    Object.entries(typeStats).forEach(([type, count]) => {
-      const helpCount = results.filter(r => r.type === type && r.hasHelp).length;
-      console.log(`${type}: ${helpCount}/${count} have help text`);
+    console.log('\nFound tools:');
+    tools.forEach(tool => {
+      console.log(`- ${tool.name} (${tool.type})`);
+      if (tool.location) {
+        console.log(`  Location: ${tool.location}`);
+      }
+      if (tool.workingDirectory) {
+        console.log(`  Working Dir: ${tool.workingDirectory}`);
+      }
     });
 
   } catch (error) {
-    log(`Error: ${error}`, 'error');
+    console.error(`Error scanning tools: ${error}`);
     process.exit(1);
   }
 }
 
-main(); 
+main().catch(error => {
+  console.error(`Unhandled error: ${error}`);
+  process.exit(1);
+}); 

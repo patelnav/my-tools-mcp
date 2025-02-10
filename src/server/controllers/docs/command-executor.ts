@@ -46,12 +46,12 @@ export async function executeTool(
     maxOutputSize: options.maxOutputSize || 50000
   };
 
-  logger.debug('Executing tool:', {
-    tool,
-    args,
-    options: finalOptions,
-    currentDir: getWorkspacePath()
-  });
+  // logger.debug('Executing tool:', {
+  //   tool,
+  //   args,
+  //   options: finalOptions,
+  //   currentDir: getWorkspacePath()
+  // });
 
   try {
     switch (tool.type) {
@@ -73,10 +73,10 @@ export async function executeTool(
       
       case 'global-bin':
         // For global tools, we don't need to check location since they should be in PATH
-        logger.debug('Using global tool:', {
-          command: tool.name,
-          args
-        });
+        // logger.debug('Using global tool:', {
+        //   command: tool.name,
+        //   args
+        // });
         break;
       
       default:
@@ -126,21 +126,21 @@ export async function executeCommand(
 ): Promise<CommandResult> {
   const workspacePath = getWorkspacePath();
   const cwd = options.cwd || workspacePath;
-  const currentDir = options.currentDir || workspacePath;
+  // const currentDir = options.currentDir || workspacePath;
   const timeout = options.timeout || 5000;
   const maxOutputSize = options.maxOutputSize || 50000;
 
   return new Promise<CommandResult>((resolve, reject) => {
     try {
-      logger.debug('Executing command:', {
-        command,
-        args,
-        cwd,
-        timeout,
-        maxOutputSize,
-        currentDir,
-        commandExists: existsSync(command)
-      });
+      // logger.debug('Executing command:', {
+      //   command,
+      //   args,
+      //   cwd,
+      //   timeout,
+      //   maxOutputSize,
+      //   currentDir,
+      //   commandExists: existsSync(command)
+      // });
       
       const child = spawn(command, args, {
         cwd,
@@ -153,7 +153,7 @@ export async function executeCommand(
 
       child.stdout.on('data', (data) => {
         const chunk = data.toString();
-        logger.debug('Command stdout:', chunk);
+        // logger.debug('Command stdout:', chunk);
         if (output.length + chunk.length <= maxOutputSize) {
           output += chunk;
         }
@@ -181,14 +181,14 @@ export async function executeCommand(
       });
 
       child.on('close', (code) => {
-        logger.debug('Command completed:', { 
-          code, 
-          output, 
-          error,
-          command,
-          args,
-          cwd
-        });
+        // logger.debug('Command completed:', { 
+        //   code, 
+        //   output, 
+        //   error,
+        //   command,
+        //   args,
+        //   cwd
+        // });
         resolve({ output: output || error, code: code || 0 });
       });
     } catch (error) {

@@ -22,7 +22,10 @@ export async function cacheWorkspaceTools(workspacePath: string): Promise<Map<st
   
   try {
     // Get all available tools
-    const tools = await getAvailableTools(workspacePath);
+    const tools = await getAvailableTools(workspacePath, {
+      types: ['global-bin', 'package-bin', 'npm-script', 'workspace-bin'],
+      debug: true
+    });
     
     // Cache each tool's info
     for (const tool of tools) {
@@ -97,4 +100,8 @@ export function hasWorkspaceCache(workspacePath: string): boolean {
 export function getCachedToolNames(workspacePath: string): string[] {
   const wsCache = workspaceToolCache.get(workspacePath);
   return wsCache ? Array.from(wsCache.keys()) : [];
+}
+
+export function isCachePopulated(): boolean {
+  return workspaceToolCache.size > 0;
 } 

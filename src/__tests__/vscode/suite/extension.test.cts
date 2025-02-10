@@ -9,16 +9,21 @@ type VSCodeExtension = import('vscode').Extension<any>;
  * @param {number} [timeout]
  * @returns {Promise<number>}
  */
-async function waitForServer(ext: VSCodeExtension, timeout = 200): Promise<number> {
+async function waitForServer(ext: VSCodeExtension, timeout = 1000): Promise<number> {
     const start = Date.now();
     console.log(`[${new Date().toISOString()}] Waiting for server to initialize...`);
     while (Date.now() - start < timeout) {
         const serverPort = ext.exports.getServerPort();
         if (serverPort) {
-            console.log(`[${new Date().toISOString()}] Server ready on port ${serverPort} after ${Date.now() - start}ms`);
-            return serverPort;
+            // Also check server health
+            const isHealthy = await ext.exports.checkServerHealth();
+            if (isHealthy) {
+                console.log(`[${new Date().toISOString()}] Server ready and healthy on port ${serverPort} after ${Date.now() - start}ms`);
+                return serverPort;
+            }
+            console.log(`[${new Date().toISOString()}] Server port ${serverPort} available but not yet healthy`);
         }
-        await new Promise(resolve => setTimeout(resolve, 20));
+        await new Promise(resolve => setTimeout(resolve, 100));
     }
     console.error(`[${new Date().toISOString()}] Server initialization timed out after ${timeout}ms`);
     throw new Error('Server failed to start within timeout');
@@ -29,7 +34,7 @@ suite('MCP Tools Extension', () => {
     let ext: VSCodeExtension;
 
     suiteSetup(async function() {
-        this.timeout(200);
+        this.timeout(2000);
         console.log(`[${new Date().toISOString()}] Setting up Extension Test Suite`);
         
         // Find and activate extension
@@ -46,18 +51,18 @@ suite('MCP Tools Extension', () => {
         console.log(`[${new Date().toISOString()}] Test Suite Teardown`);
     });
 
-    test('Extension activation should start MCP server', async () => {
+    test('Extension activation should start server', async () => {
         if (!ext) {
             throw new Error('Extension not found');
         }
-        const serverPort = await waitForServer(ext);
+        const serverPort = ext.exports.getServerPort();
         assert.ok(serverPort > 0, 'Server should be running on a valid port');
         assert.ok(serverPort >= 54321 && serverPort <= 54421, 
             'Server port should be in the MCP range (54321-54421)');
     });
 
-    test('WebView should initialize and discover tools', async function() {
-        this.timeout(200);
+    test('WebView should show server status', async function() {
+        this.timeout(5000);
         if (!ext) {
             throw new Error('Extension not found');
         }
@@ -71,18 +76,14 @@ suite('MCP Tools Extension', () => {
         await new Promise<void>((resolve, reject) => {
             const timeout = setTimeout(() => {
                 disposable.dispose();
-                reject(new Error('WebView initialization timed out after 200ms'));
-            }, 200);
+                reject(new Error('WebView initialization timed out after 5000ms'));
+            }, 5000);
 
             let webviewReady = false;
-            let workspacePathSent = false;
-            let websocketConnected = false;
+            let serverPort = ext.exports.getServerPort();
 
             const disposable = panel.webview.onDidReceiveMessage(message => {
-                // Only log message type, not payload
-                if (message.type !== 'TOOLS_DISCOVERED') {
-                    console.log(`[Test] Received message type: ${message.type}`);
-                }
+                console.log(`[Test] Received message type: ${message.type}`);
                 
                 switch (message.type) {
                     case 'WEBVIEW_READY':
@@ -90,48 +91,12 @@ suite('MCP Tools Extension', () => {
                         panel.webview.postMessage({ type: 'WEBVIEW_READY_CONFIRMED' });
                         break;
 
-                    case 'GET_WORKSPACE_PATH':
-                        assert.ok(webviewReady, 'WebView should be ready before workspace path is requested');
-                        workspacePathSent = true;
-                        const serverPort = ext.exports.getServerPort();
-                        panel.webview.postMessage({
-                            type: 'WORKSPACE_PATH',
-                            path: process.cwd(),
-                            serverPort: serverPort
-                        });
-                        break;
-
-                    case 'WEBSOCKET_STATUS':
-                        if (message.status === 'connected') {
-                            assert.ok(workspacePathSent, 'WebSocket should connect after workspace path is sent');
-                            websocketConnected = true;
-                        }
-                        break;
-
-                    case 'TOOLS_DISCOVERED':
-                        try {
-                            // Verify correct sequence
-                            assert.ok(webviewReady, 'WebView should be ready before tools are discovered');
-                            assert.ok(workspacePathSent, 'Workspace path should be sent before tools are discovered');
-                            assert.ok(websocketConnected, 'WebSocket should be connected before tools are discovered');
-                            
-                            // Verify tool data
-                            assert.ok(Array.isArray(message.payload), 'Should return array of tools');
-                            assert.ok(message.payload.length > 0, 'Should discover at least one tool');
-                            
-                            const tool = message.payload[0];
-                            assert.ok(tool.name, 'Tool should have a name');
-                            assert.ok(tool.type, 'Tool should have a type');
-                            assert.ok(tool.workingDirectory, 'Tool should have a working directory');
-
-                            clearTimeout(timeout);
-                            disposable.dispose();
-                            resolve();
-                        } catch (err) {
-                            clearTimeout(timeout);
-                            disposable.dispose();
-                            reject(err);
-                        }
+                    case 'MCP_STATUS':
+                        assert.ok(webviewReady, 'WebView should be ready before server status is received');
+                        assert.equal(message.status, 'connected', 'Server status should be connected');
+                        clearTimeout(timeout);
+                        disposable.dispose();
+                        resolve();
                         break;
                 }
             });

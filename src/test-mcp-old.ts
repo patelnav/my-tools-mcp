@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import express from 'express';
-import { createServer } from './server/index';
+import { createServer } from './server/mcp';
 
 // Simple logger
 function log(message: string, type: 'info' | 'error' | 'warn' = 'info') {

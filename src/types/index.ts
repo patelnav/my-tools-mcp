@@ -34,42 +34,22 @@ export interface ToolInfo {
   context?: Record<string, unknown>;
 }
 
-export type CommandType = 'script' | 'tool' | 'package-manager';
-
-export interface Command {
-  command: string;
-  description: string;
-  package?: string;
-  type: CommandType;
-  group?: string;
-}
-
-// WebSocket Message Types
-export type WebSocketMessageType = 
-  | 'DISCOVER_TOOLS'
-  | 'TOOLS_DISCOVERED'
-  | 'SELECT_TOOL'
-  | 'DOCUMENTATION_UPDATED'
-  | 'ERROR';
-
-export interface WebSocketMessage<T = unknown> {
-  type: WebSocketMessageType;
-  payload: T;
-}
-
 // VSCode Message Types
 export type VSCodeMessageType = 
   | 'GET_WORKSPACE_PATH'
   | 'WORKSPACE_PATH'
-  | 'WEBSOCKET_STATUS'
-  | 'TOOLS_DISCOVERED'
-  | 'DISCOVER_TOOLS'
   | 'ERROR'
   | 'HELLO'
   | 'HELLO_RESPONSE'
-  | 'DOCUMENTATION_UPDATED'
   | 'WEBVIEW_READY'
-  | 'WEBVIEW_READY_CONFIRMED';
+  | 'WEBVIEW_READY_CONFIRMED'
+  | 'MCP_STATUS'
+  | 'GET_STATE'
+  | 'STATE_UPDATE'
+  | 'START_SERVER'
+  | 'STOP_SERVER'
+  | 'SHOW_INFO'
+  | 'LOG';
 
 export interface BaseVSCodeMessage<T = unknown> {
   type: VSCodeMessageType;
@@ -80,24 +60,6 @@ export interface WorkspacePathMessage extends BaseVSCodeMessage {
   type: 'WORKSPACE_PATH';
   path: string;
   serverPort?: number;
-}
-
-export interface WebSocketStatusMessage extends BaseVSCodeMessage {
-  type: 'WEBSOCKET_STATUS';
-  status: 'connected' | 'error' | 'closed';
-  error?: string;
-}
-
-export interface ToolsDiscoveredMessage extends BaseVSCodeMessage {
-  type: 'TOOLS_DISCOVERED';
-  payload: ToolInfo[];
-}
-
-export interface DiscoverToolsMessage extends BaseVSCodeMessage {
-  type: 'DISCOVER_TOOLS';
-  payload: {
-    projectPath: string;
-  };
 }
 
 export interface ErrorMessage extends BaseVSCodeMessage {
@@ -114,11 +76,6 @@ export interface HelloResponseMessage extends BaseVSCodeMessage {
   text: string;
 }
 
-export interface DocumentationUpdatedMessage extends BaseVSCodeMessage {
-  type: 'DOCUMENTATION_UPDATED';
-  payload: DocumentationResponse;
-}
-
 export interface GetWorkspacePathMessage extends BaseVSCodeMessage {
   type: 'GET_WORKSPACE_PATH';
 }
@@ -131,15 +88,58 @@ export interface WebViewReadyConfirmedMessage extends BaseVSCodeMessage {
   type: 'WEBVIEW_READY_CONFIRMED';
 }
 
+export interface MCPStatusMessage extends BaseVSCodeMessage {
+  type: 'MCP_STATUS';
+  status: 'connected' | 'error' | 'disconnected';
+  error?: string;
+}
+
+export interface StateUpdateMessage extends BaseVSCodeMessage {
+  type: 'STATE_UPDATE';
+  payload: {
+    isConnected: boolean;
+    tools: ToolInfo[];
+  };
+}
+
+export interface GetStateMessage extends BaseVSCodeMessage {
+  type: 'GET_STATE';
+}
+
+export interface StartServerMessage extends BaseVSCodeMessage {
+  type: 'START_SERVER';
+}
+
+export interface StopServerMessage extends BaseVSCodeMessage {
+  type: 'STOP_SERVER';
+}
+
+export interface ShowInfoMessage extends BaseVSCodeMessage {
+  type: 'SHOW_INFO';
+  message: string;
+}
+
+export interface LogMessage extends BaseVSCodeMessage {
+  type: 'LOG';
+  payload: {
+    timestamp: string;
+    level: 'info' | 'error' | 'warn';
+    message: string;
+  };
+}
+
 export type VSCodeMessage = 
   | WorkspacePathMessage
-  | WebSocketStatusMessage
-  | ToolsDiscoveredMessage
-  | DiscoverToolsMessage
   | ErrorMessage
   | HelloMessage
   | HelloResponseMessage
-  | DocumentationUpdatedMessage
   | GetWorkspacePathMessage
   | WebViewReadyMessage
-  | WebViewReadyConfirmedMessage; 
+  | WebViewReadyConfirmedMessage
+  | MCPStatusMessage
+  | StateUpdateMessage
+  | GetStateMessage
+  | StartServerMessage
+  | StopServerMessage
+  | ShowInfoMessage
+  | LogMessage; 

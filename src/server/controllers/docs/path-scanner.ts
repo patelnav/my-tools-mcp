@@ -7,7 +7,6 @@
 
 import { readdir, readFile } from 'fs/promises';
 import { join, dirname } from 'path';
-import { logger } from '@server/controllers/docs/logger';
 import { env } from '@/env';
 import { getWorkspacePath } from '@/utils/workspace';
 import { readFileSync } from 'fs';
@@ -15,12 +14,18 @@ import { type ToolInfo } from '@/types/index';
 import { promisify } from 'util';
 import { execFile as execFileCb } from 'child_process';
 import * as fs from 'fs/promises';
+import { logTools, logDebug } from '@/utils/logging';
 
 const execFile = promisify(execFileCb);
 
 // Cache of scanned tools per workspace
 const toolCache = new Map<string, { tools: Map<string, ToolInfo>, timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Helper function for logging objects
+function logObject(prefix: string, obj: unknown) {
+  logTools(`${prefix}: ${JSON.stringify(obj, null, 2)}`);
+}
 
 export interface ToolScannerOptions {
   types?: string[];
@@ -41,13 +46,13 @@ interface PackageJson {
  * @returns boolean
  */
 function isExecutable(filename: string): boolean {
-  logger.debug('Checking if file is executable:', { filename, platform: process.platform });
+  logDebug('Tools', `Checking if file is executable: ${filename} (${process.platform})`);
   if (process.platform === 'win32') {
     const result = env.executableExtensions.some(ext => filename.toUpperCase().endsWith(ext));
-    logger.debug('Windows executable check:', { filename, result, extensions: env.executableExtensions });
+    logDebug('Tools', `Windows executable check: ${filename} -> ${result}`);
     return result;
   }
-  logger.debug('Unix executable check - assuming true');
+  logDebug('Tools', 'Unix executable check - assuming true');
   return true; // On Unix, we trust the file permissions (handled by readdir)
 }
 
@@ -58,8 +63,8 @@ async function scanGlobalBinaries(
   tools: Map<string, ToolInfo>,
   workspacePath: string
 ): Promise<void> {
-  // Common global tools to look for
   const globalTools = ['git', 'node', 'npm', 'yarn', 'pnpm'];
+  logTools(`Scanning for global tools: ${globalTools.join(', ')}`);
   
   // First check if any of these tools exist in the workspace bin directory
   const binPath = join(workspacePath, 'bin');
@@ -79,11 +84,12 @@ async function scanGlobalBinaries(
             type: 'workspace-bin',
             context: {}
           });
+          logTools(`Found global tool in workspace: ${name}`);
         }
       }
     }
   } catch (error) {
-    logger.debug('Error scanning workspace bin for global tools:', error);
+    logTools(`Error scanning workspace bin for global tools: ${error}`, 'warn');
   }
   
   // Then add any remaining tools as global
@@ -96,6 +102,7 @@ async function scanGlobalBinaries(
         workingDirectory: getWorkspacePath(),
         context: {}
       });
+      logTools(`Added global tool: ${tool}`);
     }
   }
 }
@@ -108,49 +115,48 @@ async function scanGlobalBinaries(
 export async function scanWorkspaceTools(
   workspacePath: string
 ): Promise<Map<string, ToolInfo>> {
-  logger.debug('Scanning workspace for tools:', { workspacePath });
+  logTools(`Scanning workspace for tools: ${workspacePath}`);
   
   // Check cache first
   const now = Date.now();
   const cached = toolCache.get(workspacePath);
   
   if (cached && (now - cached.timestamp < CACHE_TTL)) {
-    logger.debug('Using cached tools:', { tools: [...cached.tools.entries()] });
+    const toolCount = cached.tools.size;
+    logTools('Using cached tools', { toolCount });
     return cached.tools;
   }
 
   const tools = new Map<string, ToolInfo>();
   
   try {
-    // First scan package.json for scripts and workspaces
-    logger.debug('Scanning package.json...');
+    logTools('Scanning package.json...');
     await scanPackageJson(workspacePath, tools);
-    logger.debug('After package.json scan:', { tools: [...tools.entries()] });
+    logTools('Package.json scan complete', { toolCount: tools.size });
 
-    // Then scan node_modules/.bin at workspace root
-    logger.debug('Scanning node_modules/.bin...');
+    logTools('Scanning node_modules/.bin...');
     await scanNodeModulesBin(workspacePath, tools);
-    logger.debug('After node_modules/.bin scan:', { tools: [...tools.entries()] });
+    logTools('Node modules scan complete', { toolCount: tools.size });
 
-    // Then scan workspace-specific tools
-    logger.debug('Scanning workspace bin directory...');
+    logTools('Scanning workspace bin directory...');
     await scanWorkspaceBin(workspacePath, tools);
-    logger.debug('After workspace bin scan:', { tools: [...tools.entries()] });
+    logTools('Workspace bin scan complete', { toolCount: tools.size });
 
-    // Finally scan for global tools
-    logger.debug('Scanning for global tools...');
+    logTools('Scanning for global tools...');
     await scanGlobalBinaries(tools, workspacePath);
-    logger.debug('After global tools scan:', { tools: [...tools.entries()] });
+    logTools('Global tools scan complete', { toolCount: tools.size });
 
     // Update cache
     toolCache.set(workspacePath, {
       tools,
       timestamp: now
     });
+    logTools('Updated tool cache', { totalTools: tools.size });
 
     return tools;
   } catch (error) {
-    logger.error('Error scanning workspace for tools:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logTools('Error scanning workspace for tools', { error: errorMessage });
     return new Map();
   }
 }
@@ -193,12 +199,12 @@ async function scanPackageJson(
         try {
           await scanPackageJson(dirname(workspacePkgPath), tools);
         } catch (error) {
-          logger.debug(`Error scanning workspace package: ${workspacePkgPath}`, error);
+          logTools(`Error scanning workspace package: ${workspacePkgPath}`, 'warn');
         }
       }
     }
   } catch (error) {
-    logger.debug('No package.json found or error scanning:', error);
+    logTools('No package.json found or error scanning:', error);
   }
 }
 
@@ -230,7 +236,7 @@ async function scanNodeModulesBin(
       }
     }
   } catch (error) {
-    logger.debug('No node_modules/.bin found or error scanning:', error);
+    logTools('No node_modules/.bin found or error scanning:', error);
   }
 }
 
@@ -242,10 +248,11 @@ async function scanWorkspaceBin(
   tools: Map<string, ToolInfo>
 ): Promise<void> {
   const binPath = join(workspacePath, 'bin');
-  logger.debug('Scanning workspace bin directory:', { binPath, workspacePath });
+  logTools('Scanning workspace bin directory:');
   try {
     const files = await readdir(binPath, { withFileTypes: true });
-    logger.debug('Found files in bin directory:', files.map(f => ({ 
+    logTools('Found files in bin directory:');
+    logObject('Found files in bin directory', files.map(f => ({ 
       name: f.name, 
       type: f.isFile() ? 'file' : f.isSymbolicLink() ? 'symlink' : 'other',
       isExecutable: isExecutable(f.name)
@@ -259,7 +266,7 @@ async function scanWorkspaceBin(
           : file.name;
         
         const location = join(binPath, file.name);
-        logger.debug(`Found workspace binary: ${name}`, { 
+        logTools(`Found workspace binary: ${name}`, { 
           name,
           location,
           isFile: file.isFile(),
@@ -277,12 +284,12 @@ async function scanWorkspaceBin(
             type: 'workspace-bin',
             context: {}
           });
-          logger.debug(`Added workspace binary to tools:`, tools.get(name));
+          logTools(`Added workspace binary to tools:`, tools.get(name));
         } else {
-          logger.debug(`Skipping workspace binary (already exists):`, name);
+          logTools(`Skipping workspace binary (already exists):`, name);
         }
       } else {
-        logger.debug(`Skipping non-executable or non-file:`, {
+        logTools(`Skipping non-executable or non-file:`, {
           name: file.name,
           isFile: file.isFile(),
           isSymlink: file.isSymbolicLink(),
@@ -291,7 +298,7 @@ async function scanWorkspaceBin(
       }
     }
   } catch (error) {
-    logger.debug('Error scanning workspace bin directory:', { error, binPath });
+    logTools('Error scanning workspace bin directory:', { error, binPath });
   }
 }
 
@@ -319,7 +326,7 @@ export async function getAvailableTools(
   workspacePath: string,
   options: ToolScannerOptions = {}
 ): Promise<ToolInfo[]> {
-  logger.debug('Scanning workspace for tools:', { workspacePath, options });
+  logTools(`Starting tool discovery in workspace: ${workspacePath}`);
   
   const tools: ToolInfo[] = [];
   const { types = [] } = options;
@@ -327,6 +334,7 @@ export async function getAvailableTools(
   try {
     // Only scan if no type filter or 'npm-script' is included
     if (!types.length || types.includes('npm-script')) {
+      logTools('Scanning for npm scripts...');
       const packageJsonPath = join(workspacePath, 'package.json');
       try {
         const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
@@ -340,16 +348,19 @@ export async function getAvailableTools(
             context: { script }
           });
         }
+        logTools(`Found ${Object.keys(scripts).length} npm scripts`);
       } catch (error) {
-        logger.debug('No package.json found or invalid format');
+        logTools('No package.json found or invalid format');
       }
     }
 
     // Only scan if no type filter or 'package-bin' is included
     if (!types.length || types.includes('package-bin')) {
+      logTools('Scanning node_modules/.bin directory...');
       const nodeModulesBinPath = join(workspacePath, 'node_modules', '.bin');
       try {
         const binFiles = await readdir(nodeModulesBinPath, { withFileTypes: true });
+        let executableCount = 0;
         for (const file of binFiles) {
           const fullPath = join(nodeModulesBinPath, file.name);
           if (file.isFile()) {
@@ -361,17 +372,21 @@ export async function getAvailableTools(
                 location: fullPath,
                 workingDirectory: workspacePath
               });
+              executableCount++;
             }
           }
         }
+        logTools(`Found ${executableCount} package binaries`);
       } catch (error) {
-        logger.debug('No node_modules/.bin directory found');
+        logTools('No node_modules/.bin directory found');
       }
     }
 
     // Only scan if no type filter or 'global-bin' is included
     if (!types.length || types.includes('global-bin')) {
       const commonTools = ['git', 'node', 'npm', 'yarn', 'pnpm'];
+      logTools('Scanning for global tools:', commonTools);
+      let globalToolCount = 0;
       for (const tool of commonTools) {
         try {
           const result = await execFile('which', [tool]);
@@ -381,26 +396,27 @@ export async function getAvailableTools(
               type: 'global-bin',
               workingDirectory: workspacePath
             });
+            globalToolCount++;
+            logTools(`Found global tool: ${tool}`);
           }
         } catch (error) {
           // Tool not found, skip
         }
       }
+      logTools(`Found ${globalToolCount} global tools`);
     }
 
-    if (options.debug) {
-      logger.debug('Tools found:', {
-        total: tools.length,
-        byType: tools.reduce((acc, tool) => {
-          acc[tool.type] = (acc[tool.type] || 0) + 1;
-          return acc;
-        }, {} as Record<string, number>)
-      });
-    }
+    logObject('Tool discovery completed', {
+      total: tools.length,
+      byType: tools.reduce((acc, tool) => {
+        acc[tool.type] = (acc[tool.type] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>)
+    });
 
     return tools;
   } catch (error) {
-    logger.error('Error scanning workspace:', error);
+    logTools('Error scanning workspace:', error);
     throw error;
   }
 }
@@ -424,7 +440,7 @@ export async function isBinaryAvailable(binaryName: string, projectPath?: string
     const tools = await scanWorkspaceTools(projectPath || getWorkspacePath());
     return tools.has(binaryName);
   } catch (error) {
-    logger.warn(`Error checking binary availability: ${error}`);
+    logTools(`Error checking binary availability: ${error}`);
     return false;
   }
-} 
+}

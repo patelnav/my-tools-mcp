@@ -1,287 +1,306 @@
-import { WebSocketServer, WebSocket } from 'ws';
-import http from 'http';
-import express from 'express';
-import cors from 'cors';
-import type { CorsOptions } from 'cors';
-import { getServerConfig, isValidVSCodeWebviewOrigin } from '@server/config';
-import { WS_MESSAGE_TYPES, ERROR_MESSAGES, SECURITY } from '../constants';
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import express from "express";
+import { z } from "zod";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { getCachedToolInfo, getCachedToolNames, cacheWorkspaceTools, isCachePopulated } from './cache';
+import { getWorkspacePath } from '@utils/workspace';
 import { shouldLog } from '@/env';
-import { validateWorkspacePath, getWorkspacePath } from '@utils/workspace';
-import { getTestEnvironment, TestEnvironment } from '@utils/workspace';
-import { fetchToolDocumentation } from '@server/controllers/docs';
-import { getAvailableTools } from '@server/controllers/docs/path-scanner';
+import cors from 'cors';
+import type { Server as HttpServer } from 'http';
+import { logProtocol, logError, logInfo } from '@/utils/logging';
 
-interface RateLimitInfo {
-  count: number;
-  resetTime: number;
-}
+// Tool input schemas
+const ListToolsInputSchema = z.object({
+  projectPath: z.string().optional().describe("Optional workspace path")
+});
 
-type LogCallback = (message: string, type?: 'info' | 'error' | 'warn') => void;
+const GetToolInfoInputSchema = z.object({
+  toolName: z.string().describe("Name of the tool"),
+  projectPath: z.string().optional().describe("Optional workspace path")
+});
 
-function defaultLogCallback(message: string, _type: 'info' | 'error' | 'warn' = 'info'): void {
-  console.log(message);
-}
+export async function createServer(workspacePath?: string) {
+  // Initialize cache
+  const defaultWorkspacePath = workspacePath || getWorkspacePath();
+  await cacheWorkspaceTools(defaultWorkspacePath);
 
-let logCallback: LogCallback = defaultLogCallback;
-
-export function setLogCallback(callback: LogCallback): void {
-  logCallback = callback;
-}
-
-function isError(error: unknown): error is Error {
-  return error instanceof Error;
-}
-
-export async function startMCPServer(workspacePath: string, isTest = false): Promise<{ httpServer: http.Server; wsServer: WebSocketServer }> {
-  const validPath = validateWorkspacePath(workspacePath);
-  const testEnv = getTestEnvironment();
-  const isTestEnv = testEnv !== TestEnvironment.NONE || isTest;
-  
-  const config = await getServerConfig(isTestEnv);
-  try {
-    if (shouldLog()) {
-      logCallback(`Starting server with config: ${JSON.stringify(config)}`);
+  const server = new Server(
+    {
+      name: "my-tools",
+      version: "1.0.0"
+    },
+    {
+      capabilities: {
+        tools: { enabled: true },
+        prompts: { enabled: false },
+        resources: { enabled: false },
+        logging: { enabled: false },
+        roots: { listChanged: false }
+      },
     }
-  
-    const app = express();
-    
-    // Security: Restrict CORS
-    const corsOptions: CorsOptions = {
-      origin: (requestOrigin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-        if (!requestOrigin) {
-          callback(null, true);
-          return;
-        }
-        if (config.allowedOrigins.has(requestOrigin) || isValidVSCodeWebviewOrigin(requestOrigin)) {
-          callback(null, true);
-        } else {
-          const error = new Error('401 Unauthorized - Invalid origin');
-          error.message = '401';
-          callback(error);
+  );
+
+  logProtocol('Server created');
+
+  // Add list-available-tools handler
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    logProtocol('Handling ListTools request', request);
+    const tools = [
+      {
+        name: "list-available-tools",
+        description: "[PRIMARY] Lists all available tools in the workspace. This should be your first step when performing any workspace operations to discover available tools before falling back to direct terminal commands.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            projectPath: {
+              type: "string",
+              description: "Optional workspace path"
+            }
+          }
         }
       },
-      methods: ['GET', 'POST']
-    };
+      {
+        name: "get-tool-info",
+        description: "[PRIMARY] Get detailed information about a specific tool. Use this to understand tool capabilities before execution.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            toolName: {
+              type: "string",
+              description: "Name of the tool"
+            },
+            projectPath: {
+              type: "string",
+              description: "Optional workspace path"
+            }
+          },
+          required: ["toolName"]
+        }
+      }
+    ];
+    logProtocol('Responding with tools', tools);
+    return { tools };
+  });
+
+  // Add tool execution handler
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
     
-    app.use(cors(corsOptions));
-    
-    app.use(express.json());
-
-    // Add health check endpoint
-    app.get('/health', (_req, res) => {
-      res.sendStatus(200);
-    });
-
-    // Create HTTP server
-    const server = http.createServer(app);
-
-    // Create WebSocket server
-    const wss = new WebSocketServer({ 
-      server,
-      // Security: Verify client connection
-      verifyClient: ({ origin, req }: { origin: string; secure: boolean; req: http.IncomingMessage }, callback) => {
-        // In test mode, allow all connections
-        if (isTestEnv) {
-          // Get origin from query parameter if available
-          const url = new URL(req.url || '', 'ws://localhost');
-          const queryOrigin = url.searchParams.get('origin');
-          const effectiveOrigin = queryOrigin || origin;
-          
-          if (shouldLog()) {
-            logCallback(`[WebSocket] Test mode: Accepting connection attempt from origin: ${effectiveOrigin}`);
-          }
-          
-          // In test mode, if origin is explicitly set to 'invalid-origin', reject it
-          if (effectiveOrigin === 'invalid-origin') {
-            callback(false, 401, '401');
-            return;
-          }
-          
-          callback(true);
-          return;
-        }
-        
-        const allowed = config.allowedOrigins.has(origin) || isValidVSCodeWebviewOrigin(origin);
-        if (!allowed) {
-          if (shouldLog()) {
-            logCallback(`[WebSocket] Rejected connection from unauthorized origin: ${origin}`, 'warn');
-            logCallback(`[WebSocket] Allowed origins: ${JSON.stringify([...config.allowedOrigins])}`, 'warn');
-            logCallback(`[WebSocket] Origin validation result: ${isValidVSCodeWebviewOrigin(origin)}`, 'warn');
-          }
-          callback(false, 401, '401');
-          return;
-        }
-        callback(true);
+    if (name === "list-available-tools") {
+      const validatedArgs = ListToolsInputSchema.parse(args);
+      const workspacePath = validatedArgs.projectPath || defaultWorkspacePath;
+      
+      // Ensure cache is populated
+      if (!isCachePopulated()) {
+        logProtocol('Cache not populated, initializing...', { workspacePath });
+        await cacheWorkspaceTools(workspacePath);
       }
-    });
-
-    // Wait for both HTTP and WebSocket servers to be ready
-    await new Promise<void>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        reject(new Error('Server failed to start within 5 seconds'));
-      }, 5000);
-
-      let httpReady = false;
-      let wsReady = false;
-
-      function checkReady() {
-        if (httpReady && wsReady) {
-          clearTimeout(timeoutId);
-          resolve();
-        }
-      }
-
-      server.once('error', (error) => {
-        clearTimeout(timeoutId);
-        reject(error);
-      });
-
-      wss.once('error', (error) => {
-        clearTimeout(timeoutId);
-        reject(error);
-      });
-
-      // Listen for HTTP server ready
-      server.listen(config.port, config.host, () => {
-        httpReady = true;
-        checkReady();
-      });
-
-      // Listen for WebSocket server ready
-      wss.once('listening', () => {
-        wsReady = true;
-        checkReady();
-      });
-    });
-
-    // Store rate limit information for each client
-    const clientLimits = new Map<WebSocket, RateLimitInfo>();
-    const activeConnections = new Set<WebSocket>();
-
-    // Handle server errors
-    wss.on('error', (error) => {
-      if (!shouldLog()) {
-        logCallback(`WebSocket server error: ${error.message}`, 'error');
-      }
-    });
-
-    // WebSocket connection handling
-    wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
-      if (shouldLog()) {
-        logCallback(`[WebSocket] New connection established from ${req.headers.origin}`);
-        logCallback(`[WebSocket] Client headers: ${JSON.stringify(req.headers)}`);
-      }
-
-      // Track active connection
-      activeConnections.add(ws);
-
-      // Send workspace path immediately on connection
-      if (shouldLog()) {
-        logCallback(`[WebSocket] Sending workspace path: ${validPath} with port ${config.port}`);
-      }
-      ws.send(JSON.stringify({
-        type: 'WORKSPACE_PATH',
-        path: validPath,
-        serverPort: config.port
-      }));
-
-      // Automatically discover and send available tools
-      getAvailableTools(validPath).then(tools => {
-        if (shouldLog()) {
-          logCallback(`[WebSocket] Discovered ${tools.length} tools`);
-        }
-        ws.send(JSON.stringify({
-          type: WS_MESSAGE_TYPES.TOOLS_DISCOVERED,
-          payload: tools
-        }));
-      }).catch(error => {
-        if (shouldLog()) {
-          logCallback(`[WebSocket] Error discovering tools: ${error}`, 'error');
-        }
-        ws.send(JSON.stringify({
-          type: WS_MESSAGE_TYPES.ERROR,
-          payload: ERROR_MESSAGES.SERVER_ERROR
-        }));
-      });
-
-      // Handle messages
-      ws.on('message', async (data: WebSocket.Data) => {
-        try {
-          const message = JSON.parse(data.toString());
-          if (shouldLog()) {
-            logCallback(`[WebSocket] Received message: ${JSON.stringify(message)}`);
-          }
-          
-          switch (message.type) {
-            case WS_MESSAGE_TYPES.SELECT_TOOL:
-              try {
-                if (shouldLog()) {
-                  logCallback(`[WebSocket] SELECT_TOOL message received with payload: ${JSON.stringify(message.payload)}`);
-                }
-                const { name, projectPath } = message.payload || {};
-                if (!name || !projectPath) {
-                  const error = 'Invalid tool selection: missing name or project path';
-                  logCallback(`[WebSocket] ${error}`, 'error');
-                  throw new Error(error);
-                }
-                if (shouldLog()) {
-                  logCallback(`[WebSocket] Fetching documentation for tool: ${name} in path: ${projectPath}`);
-                }
-                const documentation = await fetchToolDocumentation({ name, projectPath });
-                if (shouldLog()) {
-                  logCallback(`[WebSocket] Documentation fetched successfully for ${name}`);
-                }
-                ws.send(JSON.stringify({
-                  type: WS_MESSAGE_TYPES.DOCUMENTATION_UPDATED,
-                  payload: documentation
-                }));
-              } catch (error) {
-                if (shouldLog()) {
-                  logCallback(`[WebSocket] Error fetching documentation: ${error}`, 'error');
-                }
-                ws.send(JSON.stringify({
-                  type: WS_MESSAGE_TYPES.ERROR,
-                  payload: ERROR_MESSAGES.DOCUMENTATION_FETCH_FAILED
-                }));
-              }
-              break;
-            case WS_MESSAGE_TYPES.DISCOVER_TOOLS:
-              try {
-                const tools = await getAvailableTools(validPath);
-                ws.send(JSON.stringify({
-                  type: WS_MESSAGE_TYPES.TOOLS_DISCOVERED,
-                  payload: tools
-                }));
-              } catch (error) {
-                if (shouldLog()) {
-                  logCallback(`[WebSocket] Error discovering tools: ${error}`, 'error');
-                }
-                ws.send(JSON.stringify({
-                  type: WS_MESSAGE_TYPES.ERROR,
-                  payload: ERROR_MESSAGES.TOOL_DISCOVERY_FAILED
-                }));
-              }
-              break;
-          }
-        } catch (error: unknown) {
-          if (shouldLog()) {
-            const message = isError(error) ? error.message : String(error);
-            logCallback(`Error processing message: ${message}`, 'error');
-          }
-          ws.send(JSON.stringify({
-            type: WS_MESSAGE_TYPES.ERROR,
-            payload: ERROR_MESSAGES.INVALID_MESSAGE_FORMAT
-          }));
-        }
-      });
-    });
-
-    return { httpServer: server, wsServer: wss };
-  } catch (error: unknown) {
-    if (shouldLog()) {
-      const message = isError(error) ? error.message : String(error);
-      logCallback(`Error starting server: ${message}`, 'error');
+      
+      const toolNames = getCachedToolNames(workspacePath);
+      logProtocol('Retrieved tool names from cache', { count: toolNames.length });
+      return {
+        content: [{ 
+          type: "text", 
+          text: JSON.stringify(toolNames) 
+        }]
+      };
     }
-    throw error;
+
+    if (name === "get-tool-info") {
+      const validatedArgs = GetToolInfoInputSchema.parse(args);
+      const workspacePath = validatedArgs.projectPath || defaultWorkspacePath;
+      const toolInfo = getCachedToolInfo(workspacePath, validatedArgs.toolName);
+      if (!toolInfo) {
+        const error = `Tool not found: ${validatedArgs.toolName}`;
+        logError('Protocol', error);
+        throw new Error(error);
+      }
+
+      logProtocol('Retrieved tool info', { name: validatedArgs.toolName, ...toolInfo });
+      return {
+        content: [{ 
+          type: "text", 
+          text: JSON.stringify({
+            name: validatedArgs.toolName,
+            ...toolInfo
+          })
+        }]
+      };
+    }
+
+    const error = `Unknown tool: ${name}`;
+    logError('Protocol', error);
+    throw new Error(error);
+  });
+
+  return { server };
+}
+
+export interface ServerConfig {
+  allowedOrigins: Set<string>;
+  port: number;
+}
+
+export function isValidVSCodeWebviewOrigin(origin: string): boolean {
+  // VSCode webview origins can be:
+  // - vscode-webview://hash
+  // - undefined (in some cases)
+  // - localhost during development
+  const validPrefixes = ['vscode-webview://', 'http://localhost:', 'https://localhost:'];
+  const isValid = !origin || validPrefixes.some(prefix => origin.startsWith(prefix));
+  logProtocol('Validating VSCode origin', { origin, isValid });
+  return isValid;
+}
+
+export async function findAvailablePort(startPort: number, endPort: number): Promise<number> {
+  for (let port = startPort; port <= endPort; port++) {
+    try {
+      const server = express().listen(port);
+      return new Promise((resolve) => {
+        server.close(() => resolve(port));
+      });
+    } catch {
+      continue;
+    }
   }
+  throw new Error(`No available port found in range ${startPort}-${endPort}`);
+}
+
+export interface ExtensionServer {
+  httpServer: HttpServer;
+  port: number;
+  transport: SSEServerTransport | null;
+  cleanup: () => Promise<void>;
+}
+
+export interface ExtensionServerOptions {
+  allowedOrigins?: Set<string>;
+  portRange?: { start: number; end: number };
+  fixedPort?: number;  // For testing
+  workspacePath?: string;
+}
+
+export async function startExtensionServer(options: ExtensionServerOptions = {}): Promise<ExtensionServer> {
+  const app = express();
+  
+  const port = options.fixedPort || 
+    await findAvailablePort(
+      options.portRange?.start || 54321,
+      options.portRange?.end || 54421
+    );
+
+  // Basic CORS setup
+  app.use(cors());
+  app.use(express.json());
+  
+  // Create MCP server
+  const { server } = await createServer(options.workspacePath);
+  
+  // Store transport at higher scope
+  let transport: SSEServerTransport;
+  let messageQueue: Array<{ req: express.Request; res: express.Response }> = [];
+  
+  // Simple SSE endpoint
+  app.get("/sse", async (req, res) => {
+    logProtocol('New SSE connection attempt');
+    
+    // Set headers for SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    try {
+      transport = new SSEServerTransport("/message", res);
+      logProtocol('Created new SSE transport');
+      
+      // Connect transport to server
+      await server.connect(transport);
+      logProtocol('Server connected to transport');
+      
+      // Process any queued messages
+      while (messageQueue.length > 0) {
+        const { req, res } = messageQueue.shift()!;
+        try {
+          await transport.handlePostMessage(req, res, req.body);
+        } catch (error) {
+          logError('Protocol', 'Error handling queued message', { error });
+        }
+      }
+      
+      req.on('close', () => {
+        logProtocol('SSE connection closed');
+        transport.close().catch(err => {
+          logError('Protocol', 'Error closing transport', { error: err });
+        });
+      });
+
+      req.on('error', (error) => {
+        logError('Protocol', 'SSE connection error', { 
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined 
+        });
+        transport.close().catch(err => {
+          logError('Protocol', 'Error closing transport', { error: err });
+        });
+      });
+    } catch (error) {
+      logError('Protocol', 'Error in SSE connection', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      res.status(500).end();
+    }
+  });
+
+  // Message endpoint
+  app.post("/message", async (req, res) => {
+    logProtocol('Received message', { method: req.body?.method });
+    
+    if (!transport) {
+      logProtocol('No transport available - queueing message');
+      messageQueue.push({ req, res });
+      return;
+    }
+
+    try {
+      await transport.handlePostMessage(req, res, req.body);
+      logProtocol('Message handled successfully');
+    } catch (error) {
+      logError('Protocol', 'Error handling message', { error });
+      res.status(500).json({ 
+        jsonrpc: "2.0",
+        id: req.body?.id,
+        error: {
+          code: -32000,
+          message: String(error)
+        }
+      });
+    }
+  });
+
+  const httpServer = app.listen(port, () => {
+    if (shouldLog()) {
+      logInfo('Protocol', 'Server is running', { port });
+    }
+  });
+
+  const cleanup = async () => {
+    if (shouldLog()) {
+      logInfo('Protocol', 'Shutting down server...');
+    }
+    if (transport) {
+      await transport.close();
+    }
+    return new Promise<void>((resolve) => {
+      httpServer.close(() => resolve());
+    });
+  };
+
+  return { 
+    httpServer, 
+    port,
+    transport: null, // We don't need to expose this
+    cleanup
+  };
 }

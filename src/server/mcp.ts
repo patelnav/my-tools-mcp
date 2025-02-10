@@ -1,3 +1,9 @@
+/**
+ * ARCHIVE NOTE: This was a simple test implementation of the MCP server that worked successfully.
+ * We're keeping this as a reference implementation while moving the production code to index.ts.
+ * This demonstrates the basic setup of an MCP server with tool discovery and documentation features.
+ */
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import express from "express";
