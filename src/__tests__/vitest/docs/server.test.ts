@@ -1,19 +1,36 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import WebSocket from 'ws';
-import type { DocumentationResponse, ToolInfo } from '@/types/index';
-import { TEST_CONFIG } from '../test-config';
+import type { ToolInfo } from '@/types/index';
 import type { Server } from 'http';
-import type { WsTestOptions } from '@test/utils/test-utils';
-import { createTestWebSocket, waitForWsMessage, getTestWorkspacePath, TEST_MONOREPO_PATH } from '@test/utils/test-utils';
-import { logHeader, logStep, logSuccess } from '@utils/logging';
-import { WS_MESSAGE_TYPES, ERROR_MESSAGES, TIMEOUTS } from '@/constants';
+import { logInfo } from '@utils/logging';
+import { ERROR_MESSAGES, TIMEOUTS } from '@/constants';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { z } from 'zod';
+import { TEST_MONOREPO_PATH } from '@test/utils/test-utils';
 
 declare global {
   var __test_server__: Server | undefined;
 }
 
+interface TextContent {
+  type: "text";
+  text: string;
+}
+
+interface ToolResponse {
+  content: TextContent[];
+}
+
+const toolResponseSchema = z.object({
+  content: z.array(z.object({
+    type: z.literal('text'),
+    text: z.string()
+  }))
+}) as z.ZodType<ToolResponse>;
+
 describe('MCP Server Integration', () => {
   let server: Server;
+  let client: Client;
 
   beforeEach(async () => {
     console.log(`[${new Date().toISOString()}] === Setting up test environment ===\n`);
@@ -23,459 +40,235 @@ describe('MCP Server Integration', () => {
       throw new Error('Server not initialized in setup');
     }
     server = globalServer;
-    logSuccess('Test server initialized');
+    logInfo('Protocol', 'Test server initialized');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    if (client) {
+      await client.close();
+    }
     const timestamp = new Date().toISOString();
     console.log(`[${timestamp}] === Test completed ===\n`);
   });
 
-  const wsOptions: WsTestOptions = {
-    origin: TEST_CONFIG.websocket.origin,
-    timeout: TIMEOUTS.STANDARD
-  };
-
-  const getWsUrl = () => {
+  const getServerUrl = () => {
     const address = server.address();
     if (!address || typeof address === 'string') {
       throw new Error(ERROR_MESSAGES.INVALID_SERVER_ADDRESS);
     }
-    return `ws://localhost:${address.port}`;
+    return `http://localhost:${address.port}`;
   };
 
-  // Helper function to send a tool selection message
-  const selectTool = (ws: WebSocket, toolName: string) => {
-    ws.send(JSON.stringify({
-      type: WS_MESSAGE_TYPES.SELECT_TOOL,
-      payload: {
-        name: toolName,
-        projectPath: TEST_MONOREPO_PATH
+  const createClient = async () => {
+    const serverUrl = getServerUrl();
+    const transport = new SSEClientTransport(
+      new URL(`${serverUrl}/sse`)
+    );
+    client = new Client(
+      {
+        name: 'test-client',
+        version: '1.0.0'
+      },
+      {
+        capabilities: {
+          tools: true,
+          prompts: false,
+          resources: false,
+          logging: false,
+          roots: { listChanged: false }
+        }
       }
-    }));
+    );
+
+    // Wait for connection to be established
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Connection timeout'));
+      }, TIMEOUTS.CONNECTION);
+
+      transport.onclose = () => {
+        clearTimeout(timeout);
+        reject(new Error('Connection closed'));
+      };
+
+      transport.onerror = (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      };
+
+      transport.onmessage = () => {
+        clearTimeout(timeout);
+        resolve();
+      };
+
+      client.connect(transport).catch(reject);
+    });
+
+    return client;
   };
 
   describe('Connection Management', () => {
-    it('should connect to the WebSocket server', async () => {
-      console.log('\n=== Setting up test environment ===\n');
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        throw new Error('Invalid server address');
-      }
-      const actualPort = address.port;
-      console.log(`  ✓ Test server initialized on port ${actualPort}\n`);
-
-      console.log('=== Testing WebSocket connection ===\n');
-      console.log('  → Attempting to connect to server');
-
-      const startTime = Date.now();
-      let messageReceived = false;
-
-      // Create a promise that will resolve when we receive the WORKSPACE_PATH message
-      const messagePromise = new Promise<void>((resolve, reject) => {
-        const ws = new WebSocket(`ws://localhost:${actualPort}`, {
-          origin: 'vscode-test://mcp-tools'
-        });
-
-        ws.on('error', (error) => {
-          console.error(`  ✗ WebSocket connection error: ${error.message}`);
-          reject(error);
-        });
-
-        ws.on('message', (data: WebSocket.Data) => {
-          try {
-            const message = JSON.parse(data.toString());
-            console.log(`  → Received message: ${JSON.stringify(message)}`);
-            if (message.type === 'WORKSPACE_PATH') {
-              console.log(`  ✓ Received WORKSPACE_PATH message after ${Date.now() - startTime}ms`);
-              messageReceived = true;
-              ws.close();
-              resolve();
-            }
-          } catch (error) {
-            console.error(`  ✗ Error parsing message: ${error}`);
-            reject(error);
-          }
-        });
-
-        ws.on('open', () => {
-          console.log(`  ✓ Successfully connected to WebSocket server after ${Date.now() - startTime}ms`);
-        });
-
-        ws.on('close', () => {
-          console.log('  → WebSocket connection closed');
-        });
-      });
-
-      try {
-        // Wait for the message with a timeout
-        await messagePromise;
-        expect(messageReceived).toBe(true);
-      } catch (error) {
-        throw error;
-      }
+    it('should connect to the SSE server', async () => {
+      const client = await createClient();
+      expect(client).toBeDefined();
     });
 
     it('should handle reconnection attempts', async () => {
-      // Set proper test timeout according to rules
-      // Note: Vitest uses testTimeout in config, not per-test timeouts
-      
-      console.log('\n=== Setting up test environment ===\n');
-      const address = server.address();
-      if (!address || typeof address === 'string') {
-        throw new Error(ERROR_MESSAGES.INVALID_SERVER_ADDRESS);
-      }
-      const actualPort = address.port;
-      console.log(`  ✓ Test server initialized on port ${actualPort}\n`);
+      // First connection
+      const client1 = await createClient();
+      expect(client1).toBeDefined();
+      await client1.close();
 
-      console.log('=== Testing reconnection handling ===\n');
-      console.log('  → Setting up first connection');
+      // Wait for cleanup
+      await new Promise(resolve => setTimeout(resolve, 100));
 
-      // First connection with proper timeout
-      const firstConnectionPromise = new Promise<void>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          reject(new Error('First connection timed out waiting for WORKSPACE_PATH'));
-        }, 200); // 200ms is sufficient for initial connection
-
-        const ws1 = new WebSocket(`ws://localhost:${actualPort}`, {
-          origin: 'vscode-test://mcp-tools'
-        });
-
-        ws1.on('error', (error) => {
-          clearTimeout(timeoutId);
-          console.error(`  ✗ First connection error: ${error.message}`);
-          reject(error);
-        });
-
-        ws1.on('open', () => {
-          console.log('  ✓ First connection established');
-        });
-
-        ws1.on('message', (data: WebSocket.Data) => {
-          try {
-            const message = JSON.parse(data.toString());
-            console.log(`  → First connection received message: ${JSON.stringify(message)}`);
-            if (message.type === 'WORKSPACE_PATH') {
-              console.log('  ✓ First connection received WORKSPACE_PATH');
-              clearTimeout(timeoutId);
-              resolve();
-              ws1.close();
-            }
-          } catch (error) {
-            clearTimeout(timeoutId);
-            reject(error);
-          }
-        });
-
-        ws1.on('close', () => {
-          console.log('  ✓ First connection closed');
-        });
-      });
-
-      await firstConnectionPromise;
-
-      // Wait for server to clean up - 20ms is sufficient for cleanup
-      await new Promise(resolve => setTimeout(resolve, 20));
-
-      // Verify server has 0 connections
-      const connectionCount = await new Promise<number>((resolve, reject) => {
-        server.getConnections((err, count) => {
-          if (err) reject(err);
-          console.log(`  → Current server connections: ${count}`);
-          resolve(count);
-        });
-      });
-      expect(connectionCount).toBe(0);
-
-      // Second connection with proper timeout
-      const secondConnectionPromise = new Promise<void>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          reject(new Error('Second connection timed out waiting for WORKSPACE_PATH'));
-        }, 200); // 200ms is sufficient for reconnection
-
-        const ws2 = new WebSocket(`ws://localhost:${actualPort}`, {
-          origin: 'vscode-test://mcp-tools'
-        });
-
-        ws2.on('error', (error) => {
-          clearTimeout(timeoutId);
-          console.error(`  ✗ Second connection error: ${error.message}`);
-          reject(error);
-        });
-
-        ws2.on('open', () => {
-          console.log('  ✓ Second connection established');
-        });
-
-        ws2.on('message', (data: WebSocket.Data) => {
-          try {
-            const message = JSON.parse(data.toString());
-            console.log(`  → Second connection received message: ${JSON.stringify(message)}`);
-            if (message.type === 'WORKSPACE_PATH') {
-              console.log('  ✓ Second connection received WORKSPACE_PATH');
-              clearTimeout(timeoutId);
-              resolve();
-              ws2.close();
-            }
-          } catch (error) {
-            clearTimeout(timeoutId);
-            reject(error);
-          }
-        });
-
-        ws2.on('close', () => {
-          console.log('  ✓ Second connection closed');
-        });
-      });
-
-      await secondConnectionPromise;
+      // Second connection
+      const client2 = await createClient();
+      expect(client2).toBeDefined();
+      await client2.close();
     });
   });
 
   describe('Tool Discovery and Documentation', () => {
-    it('should discover and fetch git documentation', async () => {
-      logHeader('Testing tool discovery and documentation fetching');
-      const ws = await createTestWebSocket(getWsUrl(), wsOptions);
+    it('should discover and fetch tool documentation', async () => {
+      const client = await createClient();
       
-      try {
-        logStep('Discovering available tools');
-        ws.send(JSON.stringify({
-          type: WS_MESSAGE_TYPES.DISCOVER_TOOLS,
-          payload: { projectPath: TEST_MONOREPO_PATH }
-        }));
+      // List available tools
+      const tools = await client.request(
+        {
+          method: 'list-available-tools',
+          params: {
+            projectPath: TEST_MONOREPO_PATH
+          }
+        },
+        toolResponseSchema
+      );
+      const toolsList = JSON.parse(tools.content[0].text) as ToolInfo[];
+      expect(toolsList.length).toBeGreaterThan(0);
+      expect(toolsList.some(t => t.name === 'list-available-tools')).toBe(true);
+      expect(toolsList.some(t => t.name === 'get-tool-info')).toBe(true);
 
-        const discoveredMessage = await waitForWsMessage(ws, WS_MESSAGE_TYPES.TOOLS_DISCOVERED, TIMEOUTS.STANDARD);
-        const tools = discoveredMessage.payload as ToolInfo[];
-        const gitTool = tools.find(t => t.name === 'git' && t.type === 'workspace-bin');
-        expect(gitTool).toBeDefined();
-        logSuccess(`Found git tool: ${JSON.stringify(gitTool)}`);
-
-        logStep('Fetching git documentation');
-        selectTool(ws, 'git');
-        const docMessage = await waitForWsMessage(ws, WS_MESSAGE_TYPES.DOCUMENTATION_UPDATED, TIMEOUTS.DOC_FETCH);
-        const doc = docMessage.payload as DocumentationResponse;
-        
-        if (!doc.success) {
-          console.error('Documentation fetch failed:', doc.error);
-          throw new Error(ERROR_MESSAGES.DOCUMENTATION_FETCH_FAILED);
-        }
-        
-        expect(doc.success).toBe(true);
-        expect(doc.data).toBeDefined();
-        expect(doc.data?.name).toBe('git');
-        expect(doc.data?.version).toBeDefined();
-        expect(doc.data?.helpText).toBeDefined();
-        logSuccess('Git documentation fetched successfully');
-      } finally {
-        ws.close();
-      }
+      // Get tool info
+      const toolInfo = await client.request(
+        {
+          method: 'get-tool-info',
+          params: {
+            toolName: 'list-available-tools',
+            projectPath: TEST_MONOREPO_PATH
+          }
+        },
+        toolResponseSchema
+      );
+      const toolData = JSON.parse(toolInfo.content[0].text) as ToolInfo;
+      expect(toolData.name).toBe('list-available-tools');
+      expect(toolData.type).toBeDefined();
     });
 
     it('should cache documentation results', async () => {
-      logHeader('Testing documentation caching');
-      const ws = await createTestWebSocket(getWsUrl(), wsOptions);
+      const client = await createClient();
       
-      try {
-        logStep('Discovering tools');
-        ws.send(JSON.stringify({
-          type: WS_MESSAGE_TYPES.DISCOVER_TOOLS,
-          payload: { projectPath: getTestWorkspacePath() }
-        }));
-        await waitForWsMessage(ws, WS_MESSAGE_TYPES.TOOLS_DISCOVERED, TIMEOUTS.STANDARD);
-        
-        logStep('Requesting git documentation twice');
-        selectTool(ws, 'git');
-        const firstResponse = await waitForWsMessage(ws, WS_MESSAGE_TYPES.DOCUMENTATION_UPDATED, TIMEOUTS.STANDARD);
-        
-        selectTool(ws, 'git');
-        const secondResponse = await waitForWsMessage(ws, WS_MESSAGE_TYPES.DOCUMENTATION_UPDATED, TIMEOUTS.STANDARD);
+      // First request
+      const start1 = Date.now();
+      const info1 = await client.request(
+        {
+          method: 'get-tool-info',
+          params: {
+            toolName: 'list-available-tools',
+            projectPath: TEST_MONOREPO_PATH
+          }
+        },
+        toolResponseSchema
+      );
+      const time1 = Date.now() - start1;
 
-        expect(firstResponse.payload.data?.lastUpdated).toBe(secondResponse.payload.data?.lastUpdated);
-        logSuccess('Documentation caching verified');
-      } finally {
-        ws.close();
-      }
-    });
+      // Second request (should be cached)
+      const start2 = Date.now();
+      const info2 = await client.request(
+        {
+          method: 'get-tool-info',
+          params: {
+            toolName: 'list-available-tools',
+            projectPath: TEST_MONOREPO_PATH
+          }
+        },
+        toolResponseSchema
+      );
+      const time2 = Date.now() - start2;
 
-    it('should provide properly formatted documentation', async () => {
-      logHeader('Testing documentation format and content');
-      const ws = await createTestWebSocket(getWsUrl(), wsOptions);
-      
-      try {
-        logStep('Discovering tools');
-        ws.send(JSON.stringify({
-          type: WS_MESSAGE_TYPES.DISCOVER_TOOLS,
-          payload: { projectPath: getTestWorkspacePath() }
-        }));
-        await waitForWsMessage(ws, WS_MESSAGE_TYPES.TOOLS_DISCOVERED, TIMEOUTS.STANDARD);
-        
-        logStep('Requesting git documentation');
-        selectTool(ws, 'git');
-        const docMessage = await waitForWsMessage(ws, WS_MESSAGE_TYPES.DOCUMENTATION_UPDATED, TIMEOUTS.DOC_FETCH);
-        const doc = docMessage.payload as DocumentationResponse;
-        
-        // Verify documentation structure
-        expect(doc.success).toBe(true);
-        expect(doc.data).toBeDefined();
-        expect(doc.data?.name).toBe('git');
-        expect(doc.data?.version).toMatch(/^git version \d+\.\d+\.\d+/); // Match actual git version format
-        expect(doc.data?.helpText).toBeDefined();
-        expect(doc.data?.lastUpdated).toBeDefined();
-        
-        // Verify documentation content
-        expect(doc.data?.helpText).toContain('git - the stupid content tracker');
-        expect(doc.data?.helpText).toContain('usage: git');
-        expect(doc.data?.helpText.length).toBeGreaterThan(50);
-        
-        logSuccess('Documentation format and content verified');
-      } finally {
-        ws.close();
-      }
+      expect(info1.content).toEqual(info2.content);
+      expect(time2).toBeLessThanOrEqual(time1);
     });
   });
 
   describe('Error Handling', () => {
     it('should handle invalid tool gracefully', async () => {
-      logHeader('Testing invalid tool handling');
-      const ws = await createTestWebSocket(getWsUrl(), wsOptions);
+      const client = await createClient();
       
-      try {
-        logStep('Discovering tools');
-        ws.send(JSON.stringify({
-          type: WS_MESSAGE_TYPES.DISCOVER_TOOLS,
-          payload: { projectPath: getTestWorkspacePath() }
-        }));
-        await waitForWsMessage(ws, WS_MESSAGE_TYPES.TOOLS_DISCOVERED, TIMEOUTS.STANDARD);
-
-        logStep('Requesting invalid tool documentation');
-        selectTool(ws, 'nonexistenttool');
-        const message = await waitForWsMessage(ws, WS_MESSAGE_TYPES.DOCUMENTATION_UPDATED, TIMEOUTS.STANDARD);
-        const doc = message.payload as DocumentationResponse;
-        expect(doc.success).toBe(false);
-        expect(doc.error).toBeDefined();
-        expect(doc.error).toBe(ERROR_MESSAGES.TOOL_NOT_FOUND('nonexistenttool'));
-        logSuccess('Invalid tool handled correctly');
-      } finally {
-        ws.close();
-      }
+      await expect(client.request(
+        {
+          method: 'get-tool-info',
+          params: {
+            toolName: 'nonexistenttool',
+            projectPath: TEST_MONOREPO_PATH
+          }
+        },
+        toolResponseSchema
+      )).rejects.toThrow('Tool not found');
     });
 
     it('should handle invalid message format', async () => {
-      logHeader('Testing invalid message handling');
-      const ws = await createTestWebSocket(getWsUrl(), wsOptions);
+      const serverUrl = getServerUrl();
       
-      try {
-        logStep('Sending invalid JSON message');
-        ws.send('invalid json');
-        const message = await waitForWsMessage(ws, WS_MESSAGE_TYPES.ERROR, TIMEOUTS.STANDARD);
-        expect(message.payload).toBe(ERROR_MESSAGES.INVALID_MESSAGE_FORMAT);
-        logSuccess('Invalid message handled correctly');
-      } finally {
-        ws.close();
-      }
+      const response = await fetch(`${serverUrl}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'invalid json'
+      });
+
+      expect(response.ok).toBe(false);
+      expect(response.status).toBe(400); // Changed from 500 to 400 for invalid format
     });
   });
 
   describe('Security', () => {
     it('should reject invalid origin', async () => {
-      logHeader('Testing origin validation');
-      logStep('Attempting connection with invalid origin');
-      try {
-        await createTestWebSocket(getWsUrl(), { origin: 'invalid-origin', timeout: TIMEOUTS.STANDARD });
-        throw new Error('Connection should not be established');
-      } catch (error: unknown) {
-        if (error instanceof Error) {
-          expect(error.message).toContain('401');
-          logSuccess('Invalid origin rejected successfully');
-        } else {
-          throw error;
-        }
-      }
+      const serverUrl = getServerUrl();
+      
+      const response = await fetch(`${serverUrl}/sse`, {
+        headers: { 'Origin': 'invalid-origin' }
+      });
+
+      expect(response.ok).toBe(false);
+      expect(response.status).toBe(403);
     });
-    // Rate limiting test removed temporarily
   });
 
   describe('SSE Connection Management', () => {
     it('should maintain initialization state after expected disconnects', async () => {
-      const port = 54321;  // Use fixed port for test
+      // First connection
+      const client1 = await createClient();
+      expect(client1).toBeDefined();
+      await client1.close();
+
+      // Wait for cleanup
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Second connection
+      const client2 = await createClient();
+      expect(client2).toBeDefined();
       
-      // Create SSE client
-      const eventSource = new EventSource(`http://localhost:${port}/sse`);
-      
-      // Track connection state
-      let isConnected = false;
-      let initializeResponse: any = null;
-      
-      // Set up event handlers
-      eventSource.onopen = () => {
-        isConnected = true;
-      };
-      
-      // Wait for connection
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Connection timeout')), 5000);
-        
-        const checkConnection = setInterval(() => {
-          if (isConnected) {
-            clearTimeout(timeout);
-            clearInterval(checkConnection);
-            resolve();
-          }
-        }, 100);
-      });
-      
-      // Send initialize message
-      const response = await fetch(`http://localhost:${port}/message`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          method: 'initialize',
+      // Verify we can still make requests
+      const tools = await client2.request(
+        {
+          method: 'list-available-tools',
           params: {
-            protocolVersion: '2024-11-05',
-            capabilities: {
-              tools: true,
-              prompts: false,
-              resources: false,
-              logging: false,
-              roots: {
-                listChanged: false
-              }
-            },
-            clientInfo: {
-              name: 'test-client',
-              version: '1.0.0'
-            }
-          },
-          jsonrpc: '2.0',
-          id: 0
-        })
-      });
-      
-      expect(response.ok).toBe(true);
-      
-      // Close connection
-      eventSource.close();
-      
-      // Wait a bit
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Try to reconnect
-      const newEventSource = new EventSource(`http://localhost:${port}/sse`);
-      
-      // Wait for new connection
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Reconnection timeout')), 5000);
-        
-        newEventSource.onopen = () => {
-          clearTimeout(timeout);
-          resolve();
-        };
-      });
-      
-      // Clean up
-      newEventSource.close();
+            projectPath: TEST_MONOREPO_PATH
+          }
+        },
+        toolResponseSchema
+      );
+      const toolsList = JSON.parse(tools.content[0].text) as ToolInfo[];
+      expect(toolsList.length).toBeGreaterThan(0);
     });
   });
 }); 

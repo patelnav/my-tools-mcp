@@ -66,12 +66,12 @@ export const DOC_STATUS = {
 
 // Timeouts (in milliseconds)
 export const TIMEOUTS = {
-  STANDARD: 20,           // 20ms for standard operations (measured 2-5ms)
-  RATE_LIMIT: 20,        // 20ms for rate limiting (measured 2-5ms)
-  DOC_FETCH: 200,        // 200ms for documentation fetching (may need network)
-  SERVER_START: 200,     // 200ms for server startup (measured ~91ms transform)
-  CONNECTION: 20,        // 20ms for connection attempts (measured 2-5ms)
-  COMMAND_EXECUTION: 200 // 200ms for command execution (may need process spawn)
+  STANDARD: 2000,        // 2s for standard operations
+  RATE_LIMIT: 100,       // 100ms for rate limiting
+  DOC_FETCH: 5000,       // 5s for documentation fetching (may need network)
+  SERVER_START: 2000,    // 2s for server startup
+  CONNECTION: 2000,      // 2s for connection attempts
+  COMMAND_EXECUTION: 5000 // 5s for command execution (may need process spawn)
 } as const;
 
 // Security

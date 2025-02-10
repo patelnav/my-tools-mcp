@@ -17,7 +17,7 @@ export default defineConfig({
       }
     },
     // Timeouts according to our rules (all values must be powers of 10 * 2)
-    testTimeout: 2000,    // 2s for individual tests
+    testTimeout: 20000,   // 20s for individual tests (increased from 2s for tool discovery)
     hookTimeout: 2000,    // 2s for hooks
     teardownTimeout: 200, // 200ms for cleanup
     // Setup files

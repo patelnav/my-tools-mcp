@@ -5,10 +5,11 @@ A VSCode/Cursor extension that provides an integrated MCP server and UI panel fo
 ## Core Features
 
 - 🔄 **Built-in MCP Server**
-  - Express + WebSocket server (ports 54321-54421)
+  - Express + SSE server (ports 54321-54421)
   - Secure origin validation
   - Automatic port selection
   - Connection management and cleanup
+  - Real-time event streaming
 
 - 🔍 **Tool Discovery**
   - Package scripts (npm, yarn, pnpm)
@@ -35,16 +36,17 @@ A VSCode/Cursor extension that provides an integrated MCP server and UI panel fo
 Extension Host (src/extension.ts)
 ├── Activates when VS Code starts
 ├── Creates MCP Server
-│   └── Express + WebSocket Server (54321-54421 port range)
+│   └── Express + SSE Server (54321-54421 port range)
 └── Creates WebView Panel
 ```
 
 ### 2. MCP Server (Middle Layer)
 ```
 MCP Server (src/server/*)
-├── WebSocket Server
-│   ├── Handles 'GET_AVAILABLE_TOOLS' messages
-│   └── Handles 'SELECT_TOOL' messages
+├── SSE Event Stream
+│   ├── Real-time tool discovery updates
+│   ├── Documentation streaming
+│   └── Connection state management
 │
 └── Tool Discovery System
     ├── path-scanner.ts
@@ -59,9 +61,9 @@ React WebView (src/panel/*)
 ├── UI Components
 │   └── Shows available tools and their docs
 │
-└── WebSocket Client
+└── SSE Client
     ├── Requests available tools
-    └── Requests tool documentation
+    └── Streams tool documentation
 ```
 
 ## Project Structure
@@ -72,7 +74,7 @@ my-tools-mcp/
 │   ├── extension.ts          # Extension entry point
 │   ├── env.ts               # Environment configuration
 │   ├── server/              # Built-in MCP server
-│   │   ├── index.ts         # Server setup and WebSocket handling
+│   │   ├── index.ts         # Server setup and SSE handling
 │   │   └── controllers/     # Tool discovery and execution
 │   │       ├── docs/        # Documentation controllers
 │   │       ├── path-scanner.ts    # Tool discovery
@@ -136,19 +138,22 @@ pnpm run build
 - Validates tool names and arguments
 - Implements proper timeouts
 
-### WebSocket Communication
+### SSE Communication
 - Real-time tool discovery updates
 - Secure origin validation
 - Connection management and cleanup
 - Error handling and reporting
 - Automatic reconnection support
+- Event-based streaming
+- Bi-directional message passing
 
 ### Security Features
 - Tool name validation
 - Command injection prevention
-- Origin validation for WebSocket connections
+- Origin validation for SSE connections
 - Proper error handling and reporting
 - Resource cleanup
+- Connection state management
 
 ## Testing
 
@@ -157,7 +162,7 @@ The extension includes comprehensive tests:
 - VS Code extension tests
 - Tool discovery tests
 - Security validation tests
-- WebSocket communication tests
+- SSE communication tests
 
 ## License
 

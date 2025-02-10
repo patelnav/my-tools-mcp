@@ -82,23 +82,29 @@ The project uses a mixed module system approach:
 
 ## Common Patterns
 
-### WebSocket Testing
+### SSE Testing
 ```typescript
 // Setup connection
-const ws = await createTestWebSocket(url, {
-  origin: 'vscode-test://mcp-tools',
-  timeout: TIMEOUTS.STANDARD
-});
+const eventSource = new EventSource(`${serverUrl}/sse`);
 
-// Wait for response
-const message = await waitForWsMessage(
-  ws, 
-  WS_MESSAGE_TYPES.RESPONSE_TYPE,
-  TIMEOUTS.STANDARD
-);
+// Handle connection open
+eventSource.onopen = () => {
+  console.log('SSE connection established');
+};
+
+// Handle messages
+eventSource.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  // Handle message
+};
+
+// Handle errors
+eventSource.onerror = (error) => {
+  console.error('SSE error:', error);
+};
 
 // Cleanup
-ws.close();
+eventSource.close();
 ```
 
 ### VS Code Testing
@@ -135,8 +141,8 @@ await new Promise<void>((resolve) => {
 
 ### Test Cleanup
 1. **Server Cleanup**
-   - Close WebSocket connections first
-   - Wait for WebSocket server to close
+   - Close SSE connections first
+   - Wait for server to close
    - Close HTTP server
    - Clear test instances
 
@@ -157,19 +163,76 @@ logStep('Test step description');
 logSuccess('Test succeeded');
 ```
 
-## Troubleshooting
+## SSE Connection Management
 
-### Common Issues
+### Connection States
+1. **Initial Connection**
+   - Timeout: 200ms
+   - Retry attempts: 3
+   - Backoff: 20ms
 
-1. **Port Conflicts**
-   - VS Code tests use fixed port 54321
-   - Other tests use random ports 54321-54421
-   - Solution: Check `lsof -i :54321` and kill processes
+2. **Message Exchange**
+   - Timeout: 2000ms per message
+   - Keep-alive interval: 20s
+   - Ping/pong mechanism
 
-2. **WebSocket Errors**
-   - Verify origin matches test environment
-   - Check connection cleanup
-   - Use test utilities for connections
+3. **Reconnection**
+   - Max retries: 3
+   - Backoff: Exponential (20ms, 200ms, 2000ms)
+   - State preservation
+
+4. **Cleanup**
+   - Grace period: 200ms
+   - Force close: After 2000ms
+   - Resource cleanup timeout: 20ms
+
+### Error Handling
+1. **Connection Errors**
+   - Network issues
+   - Invalid origin
+   - Server unavailable
+
+2. **Message Errors**
+   - Invalid format
+   - Missing fields
+   - Protocol violations
+
+3. **State Errors**
+   - Connection lost
+   - Server timeout
+   - Client timeout
+
+### Testing Patterns
+1. **Connection Testing**
+   ```typescript
+   it('should handle connection lifecycle', async () => {
+     // Setup
+     const eventSource = new EventSource(url);
+     
+     // Test phases
+     await testConnection(eventSource);
+     await testMessageExchange(eventSource);
+     await testReconnection(eventSource);
+     
+     // Cleanup
+     await gracefulClose(eventSource);
+   });
+   ```
+
+2. **Error Testing**
+   ```typescript
+   it('should handle errors gracefully', async () => {
+     const eventSource = new EventSource(url);
+     
+     // Test error scenarios
+     await testNetworkError(eventSource);
+     await testInvalidMessage(eventSource);
+     await testTimeout(eventSource);
+     
+     // Verify cleanup
+     await verifyCleanup(eventSource);
+   });
+   ```
 
 ## Test Timeouts
 
@@ -195,3 +258,24 @@ All timeouts must follow these rules:
    - Document timeout choices in comments
    - Use constants from `TIMEOUTS` object
    - Prefer event-based waiting over fixed timeouts
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Port Conflicts**
+   - VS Code tests use fixed port 54321
+   - Other tests use random ports 54321-54421
+   - Solution: Check `lsof -i :54321` and kill processes
+
+2. **SSE Connection Issues**
+   - Verify origin matches test environment
+   - Check connection cleanup
+   - Use test utilities for connections
+   - Verify server state management
+
+3. **State Management**
+   - Monitor connection states
+   - Track message sequences
+   - Verify cleanup completion
+   - Check resource disposal
