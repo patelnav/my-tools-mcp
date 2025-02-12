@@ -1,5 +1,7 @@
 # MCP Tools Documentation
 
+[![smithery badge](https://smithery.ai/badge/@patelnav/my-tools-mcp)](https://smithery.ai/server/@patelnav/my-tools-mcp)
+
 A VSCode/Cursor extension that provides an integrated MCP server and UI panel for retrieving and displaying command-line tool documentation. The extension automatically detects tools in your workspace and provides their documentation through a WebView panel.
 
 ## Core Features
