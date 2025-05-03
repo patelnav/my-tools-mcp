@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/patelnav-my-tools-mcp-badge.png)](https://mseep.ai/app/patelnav-my-tools-mcp)
+
 # MCP Tools Documentation
 
 A VSCode/Cursor extension that provides an integrated MCP server and UI panel for retrieving and displaying command-line tool documentation. The extension automatically detects tools in your workspace and provides their documentation through a WebView panel.
